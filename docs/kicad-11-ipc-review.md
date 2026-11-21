@@ -16,8 +16,8 @@ This review assumes:
   the KiCad GUI or through normal KiCad workflows.
 - Protobuf commands sent directly through `kicad-python`'s client are still IPC
   API usage. They are not considered file-backend workarounds.
-- The MCP will run against `kicad-python` `main`/0.9.x. The current repository
-  pin (`kicad-python>=0.8,<0.9`) must be updated before implementation.
+- The MCP runs against `kicad-python` `main`/0.9.x. The repository uses an
+  editable path source to the sibling `kicad-python` checkout.
 
 ## Bottom line
 
@@ -187,6 +187,48 @@ Mandatory fields (`Reference`, `Value`, `Datasheet`, `Description`) are
 protected from deletion. They can be read and their text/position/etc. updated
 as fields, but they cannot be removed.
 
+## Symbol editor support
+
+KiCad 11 also registers an `API_HANDLER_SYMBOL` for `DOCTYPE_SYMBOL`, in both
+the symbol editor frame and the headless symbol context. Headless mode can load
+a library symbol directly by `LIB_ID`, so no pre-opened document is needed.
+
+Registered commands: `OpenLibraryItem`, `GetOpenDocuments`, `SaveDocument`,
+`SaveCopyOfDocument`, `RevertDocument`, `GetItems`, `GetItemsById`, plus the
+shared `BeginCommit`/`EndCommit`, `CreateItems`, `UpdateItems`, `DeleteItems`,
+and modified-state commands.
+
+The handler's allowed child types are pins, fields, graphic shapes, text, text
+boxes, tables, table cells, bitmaps, and the whole `LIB_SYMBOL`. Reading is
+straightforward: `GetItems` with `KOT_LIB_SYMBOL` returns the full
+`SchematicSymbol` definition, whose children carry the unit and body style they
+belong to. The flat item list does not carry those tags, so the MCP reads the
+definition instead.
+
+Write-side limits in the current source:
+
+- `CreateItems`/`UpdateItems` reject the whole `LIB_SYMBOL` and every
+  `SCH_FIELD`, so symbol-level properties and all fields are read-only.
+- Individual item messages have no unit or body-style fields, and updating an
+  item swaps in the freshly deserialized item, which resets those tags to
+  "common to all units / body styles". Creating items has the same result.
+- Symbol fields have no UUID in the protobuf (the field is commented out as
+  reserved), so they cannot be addressed by `item_ids`.
+- `SaveDocument` requires the symbol to have a library nickname;
+  `SaveCopyOfDocument` takes a `.kicad_sym` path plus an overwrite flag rather
+  than a `Lib:Name` identifier.
+- Saving a symbol regenerates its child item UUIDs. The IDs returned by
+  `created_items` or read before a save are stale afterwards, so re-read the
+  symbol before the next edit.
+
+The MCP implements pin, text, text box, and graphic create/update/delete on top
+of the commands that work, and refuses the rest with an `invalid_request`
+result: field specs, `table`/`bitmap` writes, assigning a new item to a unit or
+body style, and updating an item that carries a unit or body-style tag in a
+multi-unit or multi-body-style symbol. A KiCad patch that preserved `m_unit`,
+`m_bodyStyle`, and `m_private` across `SwapItemData` would remove the last two
+restrictions, but that changes KiCad itself and is out of scope for the MCP.
+
 ## Current end-to-end workflow
 
 ### Interactive/GUI mode
@@ -259,8 +301,9 @@ The C++ API is ahead of the Python ergonomics in a few places:
    handler and emits a board document. Do not treat it as a `.kicad_mod`
    serializer.
 
-5. **Dependency pin.** The checked-in project currently requires
-   `kicad-python>=0.8,<0.9`. The 11.0 API requires `main`/0.9.0.dev0 or later.
+5. **Dependency source.** The project now resolves `kicad-python` from the
+   editable sibling checkout (`0.9.0.dev0` or later). Keep that checkout and its
+   `kicad` proto submodule aligned with the KiCad build under test.
 
 ## Proposed MCP tool surface (IPC only)
 
@@ -283,6 +326,9 @@ These tools are implementable with the current 11.0 source:
 | `footprint_save` | `save` |
 | `footprint_save_as` | raw `SaveCopyOfDocument` with `"Lib:NewName"` |
 | `board_place_from_library` | `place_footprint_from_library` (optional) |
+| `get_symbol_items` (implemented) | `get_items([KOT_LIB_SYMBOL])` on the open symbol document |
+| `write_symbol_items` (implemented) | `BeginCommit`, `CreateItems`/`UpdateItems`, `DeleteItems`, `EndCommit`, `SaveDocument` |
+| `delete_symbol_items` (implemented) | `BeginCommit`, `DeleteItems`, `EndCommit`, `SaveDocument` |
 
 These must **not** be offered as API tools because the API does not implement
 them. The MCP should return an explicit “manual step required” message instead:

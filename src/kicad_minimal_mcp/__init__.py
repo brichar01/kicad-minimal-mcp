@@ -1,5 +1,5 @@
 """kicad-minimal-mcp package."""
 
-from .server import main
+from kicad_minimal_mcp.server import main
 
 __all__ = ["main"]
