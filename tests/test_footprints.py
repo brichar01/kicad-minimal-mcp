@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 from itertools import pairwise
+from typing import Any
 
 import pytest
 
 pytestmark = pytest.mark.integration
 
 TEST_LIB_ID = "benri-projects:EZURIO-BL54L15_T"
+
+
+def _is_keepout(item: dict[str, Any]) -> bool:
+    """Return whether a graphic is the 5.0 x 8.5 mm user-comments keepout."""
+    return (
+        item["shape"] == "rectangle"
+        and item["layer"] == "BL_Cmts_User"
+        and item["size"] == {"width_mm": 5.0, "height_mm": 8.5}
+    )
+
+
+def _is_pin_one_marker(item: dict[str, Any]) -> bool:
+    """Return whether a graphic is the 0.25 mm silk circle at pin one."""
+    return (
+        item["shape"] == "circle"
+        and item["layer"] == "BL_F_SilkS"
+        and item["center"] == {"x_mm": 5.45, "y_mm": 4.497}
+        and item["radius_mm"] == 0.25
+    )
 
 
 @pytest.mark.anyio
@@ -113,25 +133,12 @@ async def test_mcp_get_footprint_graphics(mcp_integration) -> None:
         item["size"] == {"width_mm": 14.0, "height_mm": 10.0} for item in fab_rectangles
     )
 
-    keepouts = [
-        item
-        for item in graphics
-        if item["shape"] == "rectangle"
-        and item["layer"] == "BL_Cmts_User"
-        and item["size"] == {"width_mm": 5.0, "height_mm": 8.5}
-    ]
+    keepouts = [item for item in graphics if _is_keepout(item)]
     assert len(keepouts) == 1
     assert keepouts[0]["top_left"] == {"x_mm": 2.0, "y_mm": -4.85}
     assert keepouts[0]["bottom_right"] == {"x_mm": 7.0, "y_mm": 3.65}
 
-    pin_one_markers = [
-        item
-        for item in graphics
-        if item["shape"] == "circle"
-        and item["layer"] == "BL_F_SilkS"
-        and item["center"] == {"x_mm": 5.45, "y_mm": 4.497}
-        and item["radius_mm"] == 0.25
-    ]
+    pin_one_markers = [item for item in graphics if _is_pin_one_marker(item)]
     assert len(pin_one_markers) == 1
 
     server.assert_complete()

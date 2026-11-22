@@ -5,28 +5,25 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from kipy.errors import ApiError, ConnectionError
-from kipy.proto.common import ApiStatusCode
+from kipy import KiCad
 
 from kicad_minimal_mcp.app import mcp
-from kicad_minimal_mcp.connection import kicad_client
 from kicad_minimal_mcp.documents import document_to_dict, find_symbol_document
-from kicad_minimal_mcp.results import (
-    STATUS_ERROR,
-    STATUS_INVALID_REQUEST,
-    STATUS_KICAD_ERROR,
-    STATUS_KICAD_UNAVAILABLE,
-    STATUS_SYMBOL_UNAVAILABLE,
-    complete_result,
-)
+from kicad_minimal_mcp.results import Status, ToolResult
 from kicad_minimal_mcp.symbol.editor import symbol_editor
 from kicad_minimal_mcp.symbol.items import (
-    item_category,
     item_matches_type,
     normalise_item_type,
     symbol_definition_to_dict,
-    symbol_item_dicts,
+    symbol_item_records,
 )
+from kicad_minimal_mcp.tools.runner import (
+    ToolError,
+    open_document,
+    requested_library_id,
+    run_tool,
+)
+from kicad_minimal_mcp.type_filters import ALL_TYPES, summary_payload
 
 
 @mcp.tool()
@@ -56,118 +53,60 @@ def get_symbol_items(
     raises for an unavailable KiCad instance; inspect the ``connected`` field in
     the result instead.
     """
-    try:
+    result = ToolResult(
+        body={
+            "symbol": None,
+            "definition": None,
+            "item_type": item_type,
+            "item_id": item_ids,
+            "unit": "mm",
+            "count": 0,
+            "summary": {},
+            "items": [],
+        }
+    )
+
+    def read(kicad: KiCad) -> None:
         requested_type = normalise_item_type(item_type)
-    except ValueError as exc:
-        return complete_result(
-            {
-                "ok": False,
-                "status": STATUS_INVALID_REQUEST,
-                "retryable": False,
-                "connected": False,
-                "symbol": None,
-                "definition": None,
-                "item_type": item_type,
-                "item_ids": item_ids,
-                "unit": "mm",
-                "count": 0,
-                "summary": {},
-                "items": [],
-                "error": str(exc),
-            },
-            status=STATUS_INVALID_REQUEST,
+        if requested_type is None:
+            result.body["item_type"] = ALL_TYPES
+        else:
+            result.body["item_type"] = str(requested_type)
+
+        if item_ids is not None and not item_ids:
+            raise ToolError("item_ids must not be empty", status=Status.INVALID_REQUEST)
+
+        document = open_document(
+            kicad,
+            find_symbol_document,
+            requested_library_id(lib_id),
+            noun="symbol",
+            unavailable_status=Status.SYMBOL_UNAVAILABLE,
         )
-
-    if item_ids is not None and not item_ids:
-        return complete_result(
-            {
-                "ok": False,
-                "status": STATUS_INVALID_REQUEST,
-                "retryable": False,
-                "connected": False,
-                "symbol": None,
-                "definition": None,
-                "item_type": requested_type,
-                "item_ids": item_ids,
-                "unit": "mm",
-                "count": 0,
-                "summary": {},
-                "items": [],
-                "error": "item_ids must not be empty",
-            },
-            status=STATUS_INVALID_REQUEST,
-        )
-
-    result: dict[str, Any] = {
-        "ok": False,
-        "status": "ok",
-        "retryable": False,
-        "connected": False,
-        "symbol": None,
-        "definition": None,
-        "item_type": requested_type,
-        "item_ids": item_ids,
-        "unit": "mm",
-        "count": 0,
-        "summary": {},
-        "items": [],
-        "error": None,
-    }
-
-    kicad = kicad_client()
-
-    try:
-        try:
-            document = find_symbol_document(kicad, lib_id)
-        except ValueError as exc:
-            result["error"] = str(exc)
-            return complete_result(
-                result,
-                status=STATUS_SYMBOL_UNAVAILABLE,
-                retryable=True,
-            )
-        except ApiError as exc:
-            if exc.code != ApiStatusCode.AS_UNHANDLED:
-                raise
-            result["connected"] = True
-            result["error"] = "no symbol editor is open in KiCad"
-            return complete_result(
-                result,
-                status=STATUS_SYMBOL_UNAVAILABLE,
-                retryable=True,
-            )
-
-        result["connected"] = True
-        result["symbol"] = document_to_dict(document)
+        result.connected = True
+        result.body["symbol"] = document_to_dict(document)
 
         # kicad-python has no symbol-editor wrapper yet. The adapter scopes the
         # shared editor commands to the symbol document.
         symbol = symbol_editor(kicad, document).get_symbol()
-        result["definition"] = symbol_definition_to_dict(symbol)
+        result.body["definition"] = symbol_definition_to_dict(symbol)
 
-        items = symbol_item_dicts(symbol)
-        if requested_type != "all":
-            items = [item for item in items if item_matches_type(item, requested_type)]
+        records = symbol_item_records(symbol)
+        if requested_type is not None:
+            records = [
+                record
+                for record in records
+                if item_matches_type(record, requested_type)
+            ]
         if item_ids is not None:
             wanted = set(item_ids)
-            items = [item for item in items if item.get("id") in wanted]
+            records = [record for record in records if record.item_id in wanted]
 
-        result["items"] = items
-        result["count"] = len(items)
-        result["summary"] = dict(Counter(item_category(item) for item in items))
-
-    except ConnectionError as exc:
-        result["error"] = str(exc)
-        return complete_result(
-            result,
-            status=STATUS_KICAD_UNAVAILABLE,
-            retryable=True,
+        items = [record.to_payload() for record in records]
+        result.body["items"] = items
+        result.body["count"] = len(items)
+        result.body["summary"] = summary_payload(
+            Counter(record.category for record in records)
         )
-    except ApiError as exc:
-        result["error"] = str(exc)
-        return complete_result(result, status=STATUS_KICAD_ERROR)
-    except Exception as exc:  # noqa: BLE001 - defensive at the MCP boundary
-        result["error"] = f"{type(exc).__name__}: {exc}"
-        return complete_result(result, status=STATUS_ERROR)
 
-    return complete_result(result)
+    return run_tool(result, read)

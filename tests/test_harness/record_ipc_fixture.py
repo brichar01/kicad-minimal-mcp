@@ -47,11 +47,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from kipy import KiCad
 from kipy.client import KiCadClient
 
+from kicad_minimal_mcp.connection import kicad_client
 from kicad_minimal_mcp.documents import find_footprint_document, find_symbol_document
 from kicad_minimal_mcp.footprint.editor import footprint_editor
+from kicad_minimal_mcp.identifiers import LibraryId
 from kicad_minimal_mcp.server import (
     delete_footprint_items,
     delete_symbol_items,
@@ -215,18 +216,19 @@ def run_scenario(
     raise ValueError(f"unknown scenario {scenario!r}")
 
 
-def _revert_footprint(lib_id: str | None) -> None:
-    """Discard unsaved recording edits and restore the open footprint."""
-    kicad = KiCad(timeout_ms=2000)
-    document = find_footprint_document(kicad, lib_id)
-    footprint_editor(kicad, document).revert()
+def _revert(scenario: str, lib_id: str | None) -> None:
+    """Discard unsaved recording edits and restore the open document."""
+    kicad = kicad_client()
+    library_id = LibraryId.parse(lib_id) if lib_id is not None else None
 
+    if scenario.startswith("symbol"):
+        document = find_symbol_document(kicad, library_id)
+        editor = symbol_editor(kicad, document)
+    else:
+        document = find_footprint_document(kicad, library_id)
+        editor = footprint_editor(kicad, document)
 
-def _revert_symbol(lib_id: str | None) -> None:
-    """Discard unsaved recording edits and restore the open symbol."""
-    kicad = KiCad(timeout_ms=2000)
-    document = find_symbol_document(kicad, lib_id)
-    symbol_editor(kicad, document).revert()
+    editor.revert()
 
 
 def _candidate_sockets() -> list[Path]:
@@ -268,7 +270,7 @@ def _socket_is_live(socket_path: Path) -> bool:
     previous = os.environ.get("KICAD_API_SOCKET")
     os.environ["KICAD_API_SOCKET"] = f"ipc://{socket_path}"
     try:
-        KiCad(timeout_ms=2000).get_version()
+        kicad_client().get_version()
         return True
     except Exception:  # noqa: BLE001 - probing an arbitrary socket
         return False
@@ -299,7 +301,7 @@ def _select_socket(explicit: str | None) -> None:
     )
 
 
-def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "scenario",
@@ -371,47 +373,91 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
+def load_items(items_file: Path | None) -> list[dict[str, Any]]:
+    """Return the item specifications stored in ``items_file``."""
+    if items_file is None:
+        return []
 
-    if args.output.exists() and not args.force:
+    with items_file.open(encoding="utf-8") as source:
+        loaded = json.load(source)
+
+    if isinstance(loaded, dict):
+        return [loaded]
+    if isinstance(loaded, list):
+        return loaded
+
+    raise ValueError("--items-file must contain an object or a list")
+
+
+def record_scenario(
+    scenario: str,
+    *,
+    document_type: str,
+    lib_id: str | None,
+    item_type: str,
+    item_ids: list[str],
+    items: list[dict[str, Any]],
+    save: bool,
+) -> tuple[list[Exchange], dict[str, Any]]:
+    """Invoke one MCP tool and capture the IPC exchanges it produces."""
+    with record_exchanges() as exchanges:
+        result = run_scenario(
+            scenario,
+            document_type=document_type,
+            lib_id=lib_id,
+            item_type=item_type,
+            item_ids=item_ids,
+            items=items,
+            save=save,
+        )
+
+    return list(exchanges), result
+
+
+def main(
+    scenario: str,
+    output: Path,
+    *,
+    socket: str | None,
+    document_type: str,
+    lib_id: str | None,
+    item_type: str,
+    item_ids: list[str],
+    items_file: Path | None,
+    save: bool,
+    revert: bool,
+    force: bool,
+    print_result: bool,
+) -> int:
+    """Record one scenario's raw IPC exchanges into ``output``."""
+    if output.exists() and not force:
         print(
-            f"error: {args.output} already exists; pass --force to overwrite",
+            f"error: {output} already exists; pass --force to overwrite",
             file=sys.stderr,
         )
         return 2
 
-    items: list[dict[str, Any]] = []
-    if args.items_file is not None:
-        with args.items_file.open(encoding="utf-8") as source:
-            loaded = json.load(source)
-        if isinstance(loaded, dict):
-            items = [loaded]
-        elif isinstance(loaded, list):
-            items = loaded
-        else:
-            print("error: --items-file must contain an object or list", file=sys.stderr)
-            return 2
+    try:
+        items = load_items(items_file)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
-    _select_socket(args.socket)
+    _select_socket(socket)
 
     try:
-        with record_exchanges() as exchanges:
-            result = run_scenario(
-                args.scenario,
-                document_type=args.document_type,
-                lib_id=args.lib_id,
-                item_type=args.item_type,
-                item_ids=args.item_id,
-                items=items,
-                save=args.save,
-            )
+        exchanges, result = record_scenario(
+            scenario,
+            document_type=document_type,
+            lib_id=lib_id,
+            item_type=item_type,
+            item_ids=item_ids,
+            items=items,
+            save=save,
+        )
     finally:
-        if args.revert:
-            if args.scenario.startswith("symbol"):
-                _revert_symbol(args.lib_id)
-            else:
-                _revert_footprint(args.lib_id)
+        if revert:
+            _revert(scenario, lib_id)
 
     if not exchanges:
         print(
@@ -423,19 +469,32 @@ def main(argv: list[str] | None = None) -> int:
             print(f"tool error: {result['error']}", file=sys.stderr)
         return 1
 
-    write_recording(args.output, exchanges)
+    write_recording(output, exchanges)
 
-    print(
-        f"recorded {len(exchanges)} IPC exchange(s) for {args.scenario!r} "
-        f"to {args.output}"
-    )
+    print(f"recorded {len(exchanges)} IPC exchange(s) for {scenario!r} to {output}")
     if result.get("error") is not None:
         print(f"tool error: {result['error']}")
-    if args.print_result:
+    if print_result:
         print(json.dumps(result, indent=2, sort_keys=True))
 
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    arguments = parse_args()
+    raise SystemExit(
+        main(
+            arguments.scenario,
+            arguments.output,
+            socket=arguments.socket,
+            document_type=arguments.document_type,
+            lib_id=arguments.lib_id,
+            item_type=arguments.item_type,
+            item_ids=arguments.item_id,
+            items_file=arguments.items_file,
+            save=arguments.save,
+            revert=arguments.revert,
+            force=arguments.force,
+            print_result=arguments.print_result,
+        )
+    )

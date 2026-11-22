@@ -1,21 +1,25 @@
-"""Read conversions for symbol text, text boxes, and fields."""
+"""Read/write conversions for symbol text, text boxes, and fields."""
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass, field
 
-from kipy.proto.common.types.enums_pb2 import HorizontalAlignment, VerticalAlignment
 from kipy.schematic_types import SchematicField, SchematicText, SchematicTextBox
 
-from kicad_minimal_mcp.enums import enum_value
-from kicad_minimal_mcp.units import (
-    millimetres_from_mm,
-    mm,
-    point_from_dict,
-    point_to_dict,
-    size_from_dict,
-    size_to_dict,
+from kicad_minimal_mcp.identifiers import ItemId
+from kicad_minimal_mcp.parsing import (
+    converted,
+    integer,
+    mapping,
+    optional,
+    text,
 )
+from kicad_minimal_mcp.results import Payload
+from kicad_minimal_mcp.text_attributes import (
+    TextAttributesSpec,
+    text_attributes_to_dict,
+)
+from kicad_minimal_mcp.units import PointMm
 
 #: KiCad FIELD_T values for the mandatory fields of a symbol definition.
 MANDATORY_FIELD_IDS = {
@@ -27,115 +31,124 @@ MANDATORY_FIELD_IDS = {
 }
 
 
-def text_attributes_to_dict(attributes: Any) -> dict[str, Any]:
-    """Convert shared text attributes to the MCP-facing dictionary shape."""
-    return {
-        "size": size_to_dict(attributes.size),
-        "thickness_mm": mm(attributes.stroke_width),
-        "angle_degrees": attributes.angle,
-        "bold": attributes.bold,
-        "italic": attributes.italic,
-        "mirrored": attributes.mirrored,
-        "keep_upright": attributes.keep_upright,
-        "horizontal_alignment": HorizontalAlignment.Name(
-            attributes.horizontal_alignment
-        ),
-        "vertical_alignment": VerticalAlignment.Name(attributes.vertical_alignment),
-    }
+@dataclass(frozen=True)
+class TextSpec:
+    """A symbol text item to create or update."""
+
+    position: PointMm
+    value: str = ""
+    attributes: TextAttributesSpec = field(default_factory=TextAttributesSpec)
+    id: ItemId | None = None
+    unit: int | None = None
+    body_style: int | None = None
+
+    @classmethod
+    def parse(cls, data: object, name: str = "text") -> TextSpec:
+        """Parse a symbol text object arriving at the MCP boundary."""
+        values = mapping(data, name)
+
+        return cls(
+            position=converted(values, "position", PointMm.parse, name),
+            value=optional(values, "text", text, name) or "",
+            attributes=optional(values, "attributes", TextAttributesSpec.parse, name)
+            or TextAttributesSpec(),
+            id=optional(values, "id", text, name),
+            unit=optional(values, "unit", integer, name),
+            body_style=optional(values, "body_style", integer, name),
+        )
 
 
-def field_to_dict(field: SchematicField) -> dict[str, Any]:
+@dataclass(frozen=True)
+class TextBoxSpec:
+    """A symbol text box to create or update."""
+
+    top_left: PointMm
+    bottom_right: PointMm
+    value: str = ""
+    attributes: TextAttributesSpec = field(default_factory=TextAttributesSpec)
+    id: ItemId | None = None
+    unit: int | None = None
+    body_style: int | None = None
+
+    @classmethod
+    def parse(cls, data: object, name: str = "text box") -> TextBoxSpec:
+        """Parse a symbol text box object arriving at the MCP boundary."""
+        values = mapping(data, name)
+
+        return cls(
+            top_left=converted(values, "top_left", PointMm.parse, name),
+            bottom_right=converted(values, "bottom_right", PointMm.parse, name),
+            value=optional(values, "text", text, name) or "",
+            attributes=optional(values, "attributes", TextAttributesSpec.parse, name)
+            or TextAttributesSpec(),
+            id=optional(values, "id", text, name),
+            unit=optional(values, "unit", integer, name),
+            body_style=optional(values, "body_style", integer, name),
+        )
+
+
+def field_to_dict(item: SchematicField) -> Payload:
     """Convert a symbol field to the MCP-facing dictionary shape.
 
     Symbol fields have no unique identifier in the IPC API, so ``id`` is always
     ``None`` and fields cannot be addressed by ``item_ids``.
     """
-    text = field.text
+    item_text = item.text
+
     return {
         "type": "field",
         "id": None,
-        "field_id": MANDATORY_FIELD_IDS.get(field.name, 0),
-        "name": field.name,
-        "text": text.value,
-        "visible": field.visible,
-        "show_name": field.show_name,
-        "allow_auto_place": field.allow_auto_place,
-        "is_private": field.is_private,
-        "position": point_to_dict(text.position),
-        "attributes": text_attributes_to_dict(text.attributes),
+        "field_id": MANDATORY_FIELD_IDS.get(item.name, 0),
+        "name": item.name,
+        "text": item_text.value,
+        "visible": item.visible,
+        "show_name": item.show_name,
+        "allow_auto_place": item.allow_auto_place,
+        "is_private": item.is_private,
+        "position": PointMm.from_vector(item_text.position).to_payload(),
+        "attributes": text_attributes_to_dict(item_text.attributes),
     }
 
 
-def text_to_dict(item: SchematicText) -> dict[str, Any]:
+def text_to_dict(item: SchematicText) -> Payload:
     """Convert a symbol text item to the MCP-facing dictionary shape."""
     return {
         "type": "text",
         "id": item.id.value,
         "text": item.value,
-        "position": point_to_dict(item.position),
+        "position": PointMm.from_vector(item.position).to_payload(),
         "attributes": text_attributes_to_dict(item.text.attributes),
     }
 
 
-def text_box_to_dict(item: SchematicTextBox) -> dict[str, Any]:
+def text_box_to_dict(item: SchematicTextBox) -> Payload:
     """Convert a symbol text box to the MCP-facing dictionary shape."""
     return {
         "type": "text_box",
         "id": item.id.value,
         "text": item.value,
-        "top_left": point_to_dict(item.top_left),
-        "bottom_right": point_to_dict(item.bottom_right),
+        "top_left": PointMm.from_vector(item.top_left).to_payload(),
+        "bottom_right": PointMm.from_vector(item.bottom_right).to_payload(),
         "attributes": text_attributes_to_dict(item.textbox.attributes),
     }
 
 
-def apply_text_attributes(attributes: Any, spec: dict[str, Any]) -> None:
-    """Apply text attributes from an item specification."""
-    if "size" in spec:
-        attributes.size = size_from_dict(spec["size"])
-    if "thickness_mm" in spec:
-        attributes.stroke_width = millimetres_from_mm(spec["thickness_mm"])
-    if "angle_degrees" in spec:
-        attributes.angle = float(spec["angle_degrees"])
-    if "bold" in spec:
-        attributes.bold = bool(spec["bold"])
-    if "italic" in spec:
-        attributes.italic = bool(spec["italic"])
-    if "mirrored" in spec:
-        attributes.mirrored = bool(spec["mirrored"])
-    if "keep_upright" in spec:
-        attributes.keep_upright = bool(spec["keep_upright"])
-    if "horizontal_alignment" in spec:
-        attributes.horizontal_alignment = enum_value(
-            HorizontalAlignment, spec["horizontal_alignment"]
-        )
-    if "vertical_alignment" in spec:
-        attributes.vertical_alignment = enum_value(
-            VerticalAlignment, spec["vertical_alignment"]
-        )
-
-
-def text_from_spec(spec: dict[str, Any]) -> SchematicText:
-    """Create a symbol text item from the MCP-facing item shape."""
-    if "position" not in spec:
-        raise ValueError("a text specification requires position")
-
+def text_from_spec(spec: TextSpec) -> SchematicText:
+    """Create a symbol text item from a parsed text specification."""
     item = SchematicText()
-    item.value = str(spec.get("text", ""))
-    item.position = point_from_dict(spec["position"])
-    apply_text_attributes(item.text.attributes, spec.get("attributes", {}))
+    item.value = spec.value
+    item.position = spec.position.to_vector()
+    spec.attributes.apply(item.text.attributes)
+
     return item
 
 
-def text_box_from_spec(spec: dict[str, Any]) -> SchematicTextBox:
-    """Create a symbol text box from the MCP-facing item shape."""
-    for key in ("top_left", "bottom_right"):
-        if key not in spec:
-            raise ValueError(f"a text box specification requires {key}")
-
+def text_box_from_spec(spec: TextBoxSpec) -> SchematicTextBox:
+    """Create a symbol text box from a parsed text box specification."""
     item = SchematicTextBox()
-    item.value = str(spec.get("text", ""))
-    item.top_left = point_from_dict(spec["top_left"])
-    item.bottom_right = point_from_dict(spec["bottom_right"])
-    apply_text_attributes(item.textbox.attributes, spec.get("attributes", {}))
+    item.value = spec.value
+    item.top_left = spec.top_left.to_vector()
+    item.bottom_right = spec.bottom_right.to_vector()
+    spec.attributes.apply(item.textbox.attributes)
+
     return item

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from enum import StrEnum
 
 from google.protobuf.any_pb2 import Any as AnyMessage
 from kipy.proto.common.types import KiCadObjectType
@@ -11,6 +13,7 @@ from kipy.schematic_types import (
     SchematicField,
     SchematicGraphicShape,
     SchematicImage,
+    SchematicItem,
     SchematicPin,
     SchematicSymbol,
     SchematicTable,
@@ -19,108 +22,170 @@ from kipy.schematic_types import (
 )
 from kipy.util.proto import unpack_any
 
-from kicad_minimal_mcp.symbol.graphics import graphic_from_spec, graphic_to_dict
-from kicad_minimal_mcp.symbol.pins import pin_from_spec, pin_to_dict
+from kicad_minimal_mcp.identifiers import ItemId
+from kicad_minimal_mcp.parsing import mapping, required, text
+from kicad_minimal_mcp.results import Payload
+from kicad_minimal_mcp.symbol.graphics import (
+    GraphicSpec,
+    graphic_from_spec,
+    graphic_to_dict,
+)
+from kicad_minimal_mcp.symbol.pins import PinSpec, pin_from_spec, pin_to_dict
 from kicad_minimal_mcp.symbol.text import (
+    TextBoxSpec,
+    TextSpec,
     field_to_dict,
     text_box_from_spec,
     text_box_to_dict,
     text_from_spec,
     text_to_dict,
 )
-from kicad_minimal_mcp.units import point_to_dict
+from kicad_minimal_mcp.type_filters import Category, TypeFilter
+from kicad_minimal_mcp.units import PointMm
+
+
+class SymbolItemType(StrEnum):
+    """The item types a symbol read can filter on."""
+
+    BITMAP = "bitmap"
+    FIELD = "field"
+    GRAPHIC = "graphic"
+    OTHER = "other"
+    PIN = "pin"
+    TABLE = "table"
+    TEXT = "text"
+    TEXT_BOX = "text_box"
+
 
 #: Canonical item names mapped to the IPC object type the symbol editor accepts.
-SYMBOL_ITEM_TYPES = {
-    "pin": KiCadObjectType.KOT_SCH_PIN,
-    "field": KiCadObjectType.KOT_SCH_FIELD,
-    "text": KiCadObjectType.KOT_SCH_TEXT,
-    "text_box": KiCadObjectType.KOT_SCH_TEXTBOX,
-    "graphic": KiCadObjectType.KOT_SCH_SHAPE,
-    "table": KiCadObjectType.KOT_SCH_TABLE,
-    "bitmap": KiCadObjectType.KOT_SCH_BITMAP,
-}
-
-_ITEM_TYPE_ALIASES = {
-    "pins": "pin",
-    "fields": "field",
-    "texts": "text",
-    "textbox": "text_box",
-    "text-box": "text_box",
-    "textboxes": "text_box",
-    "text_boxes": "text_box",
-    "graphics": "graphic",
-    "shape": "graphic",
-    "shapes": "graphic",
-    "sch_shape": "graphic",
-    "tables": "table",
-    "bitmaps": "bitmap",
-    "image": "bitmap",
-    "images": "bitmap",
-}
-
-#: Categories used in the result summary, keyed by item type.
-_ITEM_CATEGORIES = {
-    "pin": "pins",
-    "field": "fields",
-    "text": "texts",
-    "text_box": "text_boxes",
-    "graphic": "graphics",
-    "table": "tables",
-    "bitmap": "bitmaps",
-}
-
-#: Protobuf message names for child items kipy does not wrap yet.
-_KIND_TO_TYPE = {
-    "SchematicPin": "pin",
-    "SchematicField": "field",
-    "SchematicText": "text",
-    "SchematicTextBox": "text_box",
-    "SchematicGraphicShape": "graphic",
-    "SchematicTable": "table",
-    "SchematicImage": "bitmap",
-}
-
-#: Attributes on ``SchematicSymbol`` that hold the mandatory fields.
-MANDATORY_FIELD_ATTRS = (
-    "reference_field",
-    "value_field",
-    "footprint_field",
-    "datasheet_field",
-    "description_field",
+SYMBOL_ITEM_TYPES = TypeFilter(
+    noun="item type",
+    prefix="kot_sch_",
+    values={
+        SymbolItemType.PIN: KiCadObjectType.KOT_SCH_PIN,
+        SymbolItemType.FIELD: KiCadObjectType.KOT_SCH_FIELD,
+        SymbolItemType.TEXT: KiCadObjectType.KOT_SCH_TEXT,
+        SymbolItemType.TEXT_BOX: KiCadObjectType.KOT_SCH_TEXTBOX,
+        SymbolItemType.GRAPHIC: KiCadObjectType.KOT_SCH_SHAPE,
+        SymbolItemType.TABLE: KiCadObjectType.KOT_SCH_TABLE,
+        SymbolItemType.BITMAP: KiCadObjectType.KOT_SCH_BITMAP,
+    },
+    aliases={
+        "bitmaps": SymbolItemType.BITMAP,
+        "fields": SymbolItemType.FIELD,
+        "graphics": SymbolItemType.GRAPHIC,
+        "image": SymbolItemType.BITMAP,
+        "images": SymbolItemType.BITMAP,
+        "pins": SymbolItemType.PIN,
+        "sch_shape": SymbolItemType.GRAPHIC,
+        "shape": SymbolItemType.GRAPHIC,
+        "shapes": SymbolItemType.GRAPHIC,
+        "tables": SymbolItemType.TABLE,
+        "text_boxes": SymbolItemType.TEXT_BOX,
+        "textbox": SymbolItemType.TEXT_BOX,
+        "textboxes": SymbolItemType.TEXT_BOX,
+        "texts": SymbolItemType.TEXT,
+    },
+    plurals={
+        SymbolItemType.PIN: Category.PINS,
+        SymbolItemType.FIELD: Category.FIELDS,
+        SymbolItemType.TEXT: Category.TEXTS,
+        SymbolItemType.TEXT_BOX: Category.TEXT_BOXES,
+        SymbolItemType.GRAPHIC: Category.GRAPHICS,
+        SymbolItemType.TABLE: Category.TABLES,
+        SymbolItemType.BITMAP: Category.BITMAPS,
+    },
 )
 
+#: Protobuf message names for child items kipy does not wrap yet.
+_KIND_TO_TYPE: Mapping[str, SymbolItemType] = {
+    "SchematicPin": SymbolItemType.PIN,
+    "SchematicField": SymbolItemType.FIELD,
+    "SchematicText": SymbolItemType.TEXT,
+    "SchematicTextBox": SymbolItemType.TEXT_BOX,
+    "SchematicGraphicShape": SymbolItemType.GRAPHIC,
+    "SchematicTable": SymbolItemType.TABLE,
+    "SchematicImage": SymbolItemType.BITMAP,
+}
+
 #: Item types that can be created or updated through the symbol editor API.
-WRITABLE_ITEM_TYPES = ("pin", "text", "text_box", "graphic")
+WRITABLE_ITEM_TYPES = (
+    SymbolItemType.PIN,
+    SymbolItemType.TEXT,
+    SymbolItemType.TEXT_BOX,
+    SymbolItemType.GRAPHIC,
+)
 
 
-def normalise_item_type(item_type: str) -> str:
+@dataclass(frozen=True)
+class SymbolItem:
+    """A symbol item: its typed identity and tags, plus the payload to show.
+
+    The payload is the JSON form the tools report. Nothing in this package looks
+    inside it; the editor works from ``item_type``, ``item_id``, ``unit``, and
+    ``body_style``.
+    """
+
+    item_type: SymbolItemType
+    item_id: ItemId | None
+    payload: Payload
+    unit: int | None = None
+    body_style: int | None = None
+    is_private: bool | None = None
+
+    @property
+    def category(self) -> Category:
+        """Return the summary category used for a symbol item."""
+        category = SYMBOL_ITEM_TYPES.plural(self.item_type)
+        if category is None:
+            return Category.OTHER
+
+        return category
+
+    def to_payload(self) -> Payload:
+        """Return the payload with the unit and body-style tags the item carries."""
+        result = dict(self.payload)
+        result["unit"] = self.unit
+        result["body_style"] = self.body_style
+
+        if self.is_private is not None:
+            result["is_private"] = self.is_private
+
+        return result
+
+
+def normalise_item_type(item_type: str) -> SymbolItemType | None:
     """Return the canonical name for a symbol item-type filter."""
-    value = item_type.strip().lower().replace(" ", "_").replace("-", "_")
-    if value.startswith("kot_sch_"):
-        value = value.removeprefix("kot_sch_")
-    value = _ITEM_TYPE_ALIASES.get(value, value)
-    if value not in {"all", *SYMBOL_ITEM_TYPES}:
-        supported = ", ".join(("all", *SYMBOL_ITEM_TYPES))
-        raise ValueError(
-            f"Unsupported item type {item_type!r}; expected one of: {supported}"
-        )
-    return value
+    return SYMBOL_ITEM_TYPES.normalise(item_type)
 
 
-def item_category(item: dict[str, Any]) -> str:
-    """Return the summary category for an MCP-facing item dictionary."""
-    return _ITEM_CATEGORIES.get(str(item.get("type")), "other")
+def item_matches_type(item: SymbolItem, item_type: SymbolItemType) -> bool:
+    """Return whether a symbol item matches a canonical item-type filter."""
+    category = SYMBOL_ITEM_TYPES.plural(item_type)
+    if category is not None:
+        return item.category == category
+
+    return item.item_type == item_type
 
 
-def item_matches_type(item: dict[str, Any], item_type: str) -> bool:
-    """Return whether an item dictionary matches a canonical item-type filter."""
-    return item_type == "all" or item.get("type") == item_type
+def item_id_of(item: SchematicItem | AnyMessage) -> ItemId | None:
+    """Return the UUID the IPC API addresses ``item`` by, when it has one."""
+    if isinstance(item, AnyMessage):
+        try:
+            proto = unpack_any(item)
+        except (NotImplementedError, ValueError):
+            return None
+
+        identifier = getattr(getattr(proto, "id", None), "value", None)
+    else:
+        identifier = getattr(getattr(item, "id", None), "value", None)
+
+    return identifier or None
 
 
-def _raw_item_to_dict(item: AnyMessage, kind: str | None) -> dict[str, Any]:
+def _raw_item_to_dict(item: AnyMessage, kind: str | None) -> Payload:
     """Convert a child item kipy returns as a raw ``Any`` protobuf."""
-    result: dict[str, Any] = {"type": _KIND_TO_TYPE.get(kind or "", "other")}
+    result: Payload = {"type": str(_KIND_TO_TYPE.get(kind or "", SymbolItemType.OTHER))}
 
     try:
         proto = unpack_any(item)
@@ -134,40 +199,60 @@ def _raw_item_to_dict(item: AnyMessage, kind: str | None) -> dict[str, Any]:
     return result
 
 
-def item_to_dict(item: Any, kind: str | None = None) -> dict[str, Any]:
-    """Convert a symbol child item to the MCP-facing dictionary shape."""
+def symbol_item(
+    item: SchematicItem | AnyMessage,
+    kind: str | None = None,
+) -> SymbolItem:
+    """Convert a symbol child item into its typed record and payload."""
     if isinstance(item, SchematicPin):
-        return pin_to_dict(item)
-    if isinstance(item, SchematicField):
-        return field_to_dict(item)
-    if isinstance(item, SchematicText):
-        return text_to_dict(item)
-    if isinstance(item, SchematicTextBox):
-        return text_box_to_dict(item)
-    if isinstance(item, SchematicGraphicShape):
-        return graphic_to_dict(item)
-    if isinstance(item, SchematicImage):
-        return {
+        item_type, payload = SymbolItemType.PIN, pin_to_dict(item)
+    elif isinstance(item, SchematicField):
+        item_type, payload = SymbolItemType.FIELD, field_to_dict(item)
+    elif isinstance(item, SchematicText):
+        item_type, payload = SymbolItemType.TEXT, text_to_dict(item)
+    elif isinstance(item, SchematicTextBox):
+        item_type, payload = SymbolItemType.TEXT_BOX, text_box_to_dict(item)
+    elif isinstance(item, SchematicGraphicShape):
+        item_type, payload = SymbolItemType.GRAPHIC, graphic_to_dict(item)
+    elif isinstance(item, SchematicImage):
+        item_type = SymbolItemType.BITMAP
+        payload = {
             "type": "bitmap",
             "id": item.id.value,
-            "position": point_to_dict(item.position),
+            "position": PointMm.from_vector(item.position).to_payload(),
             "scale": item.image_scale,
         }
-    if isinstance(item, SchematicTable):
-        return {
+    elif isinstance(item, SchematicTable):
+        item_type = SymbolItemType.TABLE
+        payload = {
             "type": "table",
             "id": item.id.value,
             "column_count": item.column_count,
         }
-    if isinstance(item, AnyMessage):
-        return _raw_item_to_dict(item, kind)
+    elif isinstance(item, AnyMessage):
+        item_type = _KIND_TO_TYPE.get(kind or "", SymbolItemType.OTHER)
+        payload = _raw_item_to_dict(item, kind)
+    else:
+        identifier = item_id_of(item)
+        item_type = SymbolItemType.OTHER
+        payload = {"type": "other", "id": identifier}
 
-    return {"type": "other", "id": getattr(getattr(item, "id", None), "value", None)}
+    return SymbolItem(
+        item_type=item_type,
+        item_id=item_id_of(item),
+        payload=payload,
+    )
 
 
-def symbol_definition_to_dict(symbol: SchematicSymbol) -> dict[str, Any]:
+def item_to_dict(item: SchematicItem | AnyMessage, kind: str | None = None) -> Payload:
+    """Convert a symbol child item to the MCP-facing dictionary shape."""
+    return symbol_item(item, kind).payload
+
+
+def symbol_definition_to_dict(symbol: SchematicSymbol) -> Payload:
     """Convert the symbol-level metadata to the MCP-facing dictionary shape."""
     attributes = symbol.attributes
+
     return {
         "lib_id": str(symbol.id),
         "type": SchematicSymbolType.Name(symbol.type),
@@ -185,60 +270,105 @@ def symbol_definition_to_dict(symbol: SchematicSymbol) -> dict[str, Any]:
     }
 
 
-def symbol_item_dicts(symbol: SchematicSymbol) -> list[dict[str, Any]]:
+def _mandatory_fields(symbol: SchematicSymbol) -> tuple[SchematicField, ...]:
+    return (
+        symbol.reference_field,
+        symbol.value_field,
+        symbol.footprint_field,
+        symbol.datasheet_field,
+        symbol.description_field,
+    )
+
+
+def symbol_item_records(symbol: SchematicSymbol) -> list[SymbolItem]:
     """Flatten a symbol definition into mandatory fields and child items.
 
     Child items keep the unit, body style, and privacy tags from their
     ``SchematicSymbolChild`` wrapper; mandatory fields are common to all units
     and body styles, so their tags are ``None``.
     """
-    items: list[dict[str, Any]] = []
-
-    for attribute in MANDATORY_FIELD_ATTRS:
-        result = field_to_dict(getattr(symbol, attribute))
-        result["unit"] = None
-        result["body_style"] = None
-        items.append(result)
+    records = [
+        SymbolItem(
+            item_type=SymbolItemType.FIELD,
+            item_id=None,
+            payload=field_to_dict(item),
+        )
+        for item in _mandatory_fields(symbol)
+    ]
 
     for child in symbol.items:
-        result = item_to_dict(child.item, kind=child.kind)
-        # KiCad writes 0 for "common to all units / body styles"; report both
-        # the absent and zero forms as ``None`` so callers see one convention.
-        result["unit"] = child.unit or None
-        result["body_style"] = child.body_style or None
-        result["is_private"] = bool(child.is_private or result.get("is_private", False))
-        items.append(result)
+        record = symbol_item(child.item, kind=child.kind)
+        is_private = bool(child.is_private or record.payload.get("is_private", False))
+        records.append(
+            replace(
+                record,
+                unit=child.unit or None,
+                body_style=child.body_style or None,
+                is_private=is_private,
+            )
+        )
 
-    return items
+    return records
 
 
-def item_from_spec(spec: dict[str, Any]) -> Any:
-    """Create a KiCad symbol item from the MCP-facing item shape.
+#: The item specifications a symbol writer accepts.
+SymbolItemSpec = PinSpec | TextSpec | TextBoxSpec | GraphicSpec
+
+
+def spec_item_type(spec: SymbolItemSpec) -> SymbolItemType:
+    """Return the item type a write specification creates."""
+    match spec:
+        case PinSpec():
+            return SymbolItemType.PIN
+        case TextSpec():
+            return SymbolItemType.TEXT
+        case TextBoxSpec():
+            return SymbolItemType.TEXT_BOX
+
+    return SymbolItemType.GRAPHIC
+
+
+def item_from_spec(spec: SymbolItemSpec) -> SchematicItem:
+    """Create a KiCad symbol item from a parsed item specification."""
+    match spec:
+        case PinSpec():
+            return pin_from_spec(spec)
+        case TextSpec():
+            return text_from_spec(spec)
+        case TextBoxSpec():
+            return text_box_from_spec(spec)
+        case GraphicSpec():
+            return graphic_from_spec(spec)
+
+    raise ValueError("unsupported item specification")
+
+
+def parse_item_spec(data: object) -> SymbolItemSpec:
+    """Parse the MCP-facing item shape into a typed specification.
 
     Only pins, text, text boxes, and graphics are writable. Symbol fields are
     owned by the parent symbol and cannot be created or updated through the item
     commands, and tables and bitmaps are not supported yet.
     """
-    item_type = str(spec.get("type", "")).lower()
+    values = mapping(data, "item specification")
+    kind = text(required(values, "type", "item specification"), "item.type").lower()
 
-    if item_type == "pin":
-        return pin_from_spec(spec)
-    if item_type == "text":
-        return text_from_spec(spec)
-    if item_type == "text_box":
-        return text_box_from_spec(spec)
-    if item_type == "graphic":
-        return graphic_from_spec(spec)
+    match kind:
+        case "pin":
+            return PinSpec.parse(values)
+        case "text":
+            return TextSpec.parse(values)
+        case "text_box":
+            return TextBoxSpec.parse(values)
+        case "graphic":
+            return GraphicSpec.parse(values)
+        case "field":
+            raise ValueError(
+                "symbol fields cannot be created or updated through the IPC API; "
+                "edit them in the symbol editor"
+            )
+        case "table" | "bitmap":
+            raise ValueError(f"symbol {kind} items are read-only through this tool")
 
-    if item_type == "field":
-        raise ValueError(
-            "symbol fields cannot be created or updated through the IPC API; edit "
-            "them in the symbol editor"
-        )
-    if item_type in {"table", "bitmap"}:
-        raise ValueError(f"symbol {item_type} items are read-only through this tool")
-
-    supported = ", ".join(WRITABLE_ITEM_TYPES)
-    raise ValueError(
-        f"unsupported item type {item_type!r}; expected one of: {supported}"
-    )
+    supported = ", ".join(str(item_type) for item_type in WRITABLE_ITEM_TYPES)
+    raise ValueError(f"unsupported item type {kind!r}; expected one of: {supported}")

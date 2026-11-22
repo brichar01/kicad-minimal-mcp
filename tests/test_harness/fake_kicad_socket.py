@@ -207,14 +207,16 @@ class FakeKiCadSocket:
 
         expected_type = expected_request.message.TypeName()
         actual_type = request.message.TypeName()
+        payload_differs = (
+            self._verify_requests
+            and request.message.value != expected_request.message.value
+        )
+
         if expected_type != actual_type:
             self._mismatches.append(
                 f"exchange {self._index}: expected {expected_type}, got {actual_type}"
             )
-        elif (
-            self._verify_requests
-            and request.message.value != expected_request.message.value
-        ):
+        elif payload_differs:
             self._mismatches.append(
                 f"exchange {self._index}: {actual_type} payload differs"
             )

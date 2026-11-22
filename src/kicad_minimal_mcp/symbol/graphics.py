@@ -1,8 +1,9 @@
-"""Read conversions for symbol graphic shapes."""
+"""Read/write conversions for symbol graphic shapes."""
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 
 from kipy.common_types import (
     Arc,
@@ -12,7 +13,6 @@ from kipy.common_types import (
     EllipseArc,
     Polygon,
     Rectangle,
-    Segment,
 )
 from kipy.geometry import (
     Angle,
@@ -25,19 +25,249 @@ from kipy.geometry import (
 from kipy.proto.common.types.enums_pb2 import StrokeLineStyle
 from kipy.schematic_types import SchematicGraphicShape
 
-from kicad_minimal_mcp.enums import enum_value
-from kicad_minimal_mcp.geometry import polygon_geometry_to_dict
-from kicad_minimal_mcp.units import (
-    millimetres_from_mm,
-    mm,
-    point_from_dict,
-    point_to_dict,
-    size_to_dict,
+from kicad_minimal_mcp.geometry import (
+    GraphicAppearance,
+    StrokeSpec,
+    polygon_geometry_to_dict,
+)
+from kicad_minimal_mcp.identifiers import ItemId
+from kicad_minimal_mcp.parsing import (
+    boolean,
+    converted,
+    converted_list,
+    integer,
+    mapping,
+    number,
+    optional,
+    sequence,
+    text,
+)
+from kicad_minimal_mcp.results import Payload
+from kicad_minimal_mcp.units import PointMm, SizeMm, api_from_mm, mm_from_api
+
+
+@dataclass(frozen=True)
+class ArcNode:
+    """An arc segment of a polygon outline."""
+
+    start: PointMm
+    mid: PointMm
+    end: PointMm
+
+    @classmethod
+    def parse(cls, data: object, name: str) -> ArcNode:
+        """Parse an arc node object arriving at the MCP boundary."""
+        values = mapping(data, name)
+
+        return cls(
+            start=converted(values, "start", PointMm.parse, name),
+            mid=converted(values, "mid", PointMm.parse, name),
+            end=converted(values, "end", PointMm.parse, name),
+        )
+
+
+#: A point or an arc segment in a polygon outline.
+PolygonNode = PointMm | ArcNode
+
+
+@dataclass(frozen=True)
+class PolygonOutline:
+    """A polygon outline, its closed flag, and the holes cut out of it."""
+
+    outline: list[PolygonNode] = field(default_factory=list)
+    closed: bool = False
+    holes: list[list[PointMm]] = field(default_factory=list)
+
+    @classmethod
+    def parse(cls, data: object, name: str = "polygon") -> PolygonOutline:
+        """Parse a polygon object arriving at the MCP boundary."""
+        values = mapping(data, name)
+        closed = optional(values, "closed", boolean, name)
+
+        return cls(
+            outline=converted_list(values, "outline", _parse_node, name),
+            closed=False if closed is None else closed,
+            holes=converted_list(values, "holes", _parse_hole, name),
+        )
+
+    def to_geometry(self) -> PolygonWithHoles:
+        """Build the kipy polygon this outline describes."""
+        polygon = PolygonWithHoles(auto_close=False)
+        polygon.outline = _polyline(self.outline, closed=self.closed)
+
+        for hole in self.holes:
+            polygon.holes.append(_polyline(hole, closed=True))
+
+        return polygon
+
+
+@dataclass(frozen=True)
+class ArcShape:
+    """A graphic arc drawn through three points."""
+
+    start: PointMm
+    mid: PointMm
+    end: PointMm
+
+
+@dataclass(frozen=True)
+class CircleShape:
+    """A graphic circle."""
+
+    center: PointMm
+    radius_mm: float
+
+
+@dataclass(frozen=True)
+class RectangleShape:
+    """A graphic rectangle."""
+
+    top_left: PointMm
+    bottom_right: PointMm
+
+
+@dataclass(frozen=True)
+class BezierShape:
+    """A graphic bezier curve."""
+
+    start: PointMm
+    control1: PointMm
+    control2: PointMm
+    end: PointMm
+
+
+@dataclass(frozen=True)
+class PolygonShape:
+    """A filled or outline polygon."""
+
+    polygons: list[PolygonOutline] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class EllipseShape:
+    """A graphic ellipse."""
+
+    center: PointMm
+    major_radius_mm: float
+    minor_radius_mm: float
+    rotation_degrees: float = 0.0
+
+
+@dataclass(frozen=True)
+class EllipseArcShape:
+    """A graphic arc of an ellipse."""
+
+    center: PointMm
+    major_radius_mm: float
+    minor_radius_mm: float
+    rotation_degrees: float = 0.0
+    start_angle_degrees: float = 0.0
+    end_angle_degrees: float = 0.0
+
+
+#: The shapes a symbol graphic can draw.
+SymbolShape = (
+    ArcShape
+    | CircleShape
+    | RectangleShape
+    | BezierShape
+    | PolygonShape
+    | EllipseShape
+    | EllipseArcShape
 )
 
 
-def _graphic_base_to_dict(item: SchematicGraphicShape) -> dict[str, Any]:
-    result: dict[str, Any] = {
+@dataclass(frozen=True)
+class GraphicSpec(GraphicAppearance):
+    """A symbol graphic: the shared appearance plus the shape it draws."""
+
+    shape: SymbolShape
+    id: ItemId | None = None
+    unit: int | None = None
+    body_style: int | None = None
+
+    @classmethod
+    def parse(cls, data: object, name: str = "graphic") -> GraphicSpec:
+        """Parse a symbol graphic object arriving at the MCP boundary."""
+        values = mapping(data, name)
+        shape = converted(values, "shape", text, name)
+
+        if shape.lower() == "segment":
+            raise ValueError(
+                "symbol graphics do not support segments; use a polygon with two points"
+            )
+
+        return cls(
+            shape=_parse_shape(shape, values, name),
+            stroke=optional(values, "stroke", StrokeSpec.parse, name),
+            filled=optional(values, "filled", boolean, name),
+            id=optional(values, "id", text, name),
+            unit=optional(values, "unit", integer, name),
+            body_style=optional(values, "body_style", integer, name),
+        )
+
+
+def _parse_shape(
+    shape: str,
+    values: Mapping[str, object],
+    name: str,
+) -> SymbolShape:
+    match shape.lower():
+        case "arc":
+            return ArcShape(
+                start=converted(values, "start", PointMm.parse, name),
+                mid=converted(values, "mid", PointMm.parse, name),
+                end=converted(values, "end", PointMm.parse, name),
+            )
+        case "circle":
+            return CircleShape(
+                center=converted(values, "center", PointMm.parse, name),
+                radius_mm=converted(values, "radius_mm", number, name),
+            )
+        case "rectangle":
+            return RectangleShape(
+                top_left=converted(values, "top_left", PointMm.parse, name),
+                bottom_right=converted(values, "bottom_right", PointMm.parse, name),
+            )
+        case "bezier":
+            return BezierShape(
+                start=converted(values, "start", PointMm.parse, name),
+                control1=converted(values, "control1", PointMm.parse, name),
+                control2=converted(values, "control2", PointMm.parse, name),
+                end=converted(values, "end", PointMm.parse, name),
+            )
+        case "polygon":
+            return PolygonShape(
+                polygons=converted_list(values, "polygons", PolygonOutline.parse, name),
+            )
+        case "ellipse":
+            return EllipseShape(
+                center=converted(values, "center", PointMm.parse, name),
+                major_radius_mm=converted(values, "major_radius_mm", number, name),
+                minor_radius_mm=converted(values, "minor_radius_mm", number, name),
+                rotation_degrees=optional(values, "rotation_degrees", number, name)
+                or 0.0,
+            )
+        case "ellipse_arc":
+            return EllipseArcShape(
+                center=converted(values, "center", PointMm.parse, name),
+                major_radius_mm=converted(values, "major_radius_mm", number, name),
+                minor_radius_mm=converted(values, "minor_radius_mm", number, name),
+                rotation_degrees=optional(values, "rotation_degrees", number, name)
+                or 0.0,
+                start_angle_degrees=optional(
+                    values, "start_angle_degrees", number, name
+                )
+                or 0.0,
+                end_angle_degrees=optional(values, "end_angle_degrees", number, name)
+                or 0.0,
+            )
+
+    raise ValueError(f"unsupported graphic shape {shape!r}")
+
+
+def graphic_base_to_dict(item: SchematicGraphicShape) -> Payload:
+    result: Payload = {
         "type": "graphic",
         "id": item.id.value,
         "shape": "unknown",
@@ -51,160 +281,156 @@ def _graphic_base_to_dict(item: SchematicGraphicShape) -> dict[str, Any]:
 
     attributes = shape.attributes
     result["stroke"] = {
-        "width_mm": mm(attributes.stroke.width),
+        "width_mm": mm_from_api(attributes.stroke.width),
         "style": StrokeLineStyle.Name(attributes.stroke.style),
     }
     result["filled"] = attributes.fill.filled
+
     return result
 
 
-def graphic_to_dict(item: SchematicGraphicShape) -> dict[str, Any]:
+def graphic_to_dict(item: SchematicGraphicShape) -> Payload:
     """Convert a symbol graphic shape to the MCP-facing dictionary shape."""
-    result = _graphic_base_to_dict(item)
+    result = graphic_base_to_dict(item)
     shape = item.shape
 
-    if isinstance(shape, Segment):
-        result["shape"] = "segment"
-        result["start"] = point_to_dict(shape.start)
-        result["end"] = point_to_dict(shape.end)
-    elif isinstance(shape, Arc):
+    if isinstance(shape, Arc):
         result["shape"] = "arc"
-        result["start"] = point_to_dict(shape.start)
-        result["mid"] = point_to_dict(shape.mid)
-        result["end"] = point_to_dict(shape.end)
+        result["start"] = PointMm.from_vector(shape.start).to_payload()
+        result["mid"] = PointMm.from_vector(shape.mid).to_payload()
+        result["end"] = PointMm.from_vector(shape.end).to_payload()
     elif isinstance(shape, Circle):
         result["shape"] = "circle"
-        result["center"] = point_to_dict(shape.center)
-        result["radius_mm"] = mm(shape.radius())
+        result["center"] = PointMm.from_vector(shape.center).to_payload()
+        result["radius_mm"] = mm_from_api(shape.radius())
     elif isinstance(shape, Rectangle):
         result["shape"] = "rectangle"
-        result["top_left"] = point_to_dict(shape.top_left)
-        result["bottom_right"] = point_to_dict(shape.bottom_right)
-        result["size"] = size_to_dict(shape.bottom_right - shape.top_left)
+        result["top_left"] = PointMm.from_vector(shape.top_left).to_payload()
+        result["bottom_right"] = PointMm.from_vector(shape.bottom_right).to_payload()
+        result["size"] = SizeMm.from_vector(
+            shape.bottom_right - shape.top_left
+        ).to_payload()
     elif isinstance(shape, Polygon):
         result["shape"] = "polygon"
         result["polygons"] = polygon_geometry_to_dict(shape)
     elif isinstance(shape, Bezier):
         result["shape"] = "bezier"
-        result["start"] = point_to_dict(shape.start)
-        result["control1"] = point_to_dict(shape.control1)
-        result["control2"] = point_to_dict(shape.control2)
-        result["end"] = point_to_dict(shape.end)
+        result["start"] = PointMm.from_vector(shape.start).to_payload()
+        result["control1"] = PointMm.from_vector(shape.control1).to_payload()
+        result["control2"] = PointMm.from_vector(shape.control2).to_payload()
+        result["end"] = PointMm.from_vector(shape.end).to_payload()
     elif isinstance(shape, EllipseArc):
         result["shape"] = "ellipse_arc"
-        result["center"] = point_to_dict(shape.center)
-        result["major_radius_mm"] = mm(shape.major_radius)
-        result["minor_radius_mm"] = mm(shape.minor_radius)
+        result["center"] = PointMm.from_vector(shape.center).to_payload()
+        result["major_radius_mm"] = mm_from_api(shape.major_radius)
+        result["minor_radius_mm"] = mm_from_api(shape.minor_radius)
         result["rotation_degrees"] = shape.rotation.degrees
         result["start_angle_degrees"] = shape.start_angle.degrees
         result["end_angle_degrees"] = shape.end_angle.degrees
     elif isinstance(shape, Ellipse):
         result["shape"] = "ellipse"
-        result["center"] = point_to_dict(shape.center)
-        result["major_radius_mm"] = mm(shape.major_radius)
-        result["minor_radius_mm"] = mm(shape.minor_radius)
+        result["center"] = PointMm.from_vector(shape.center).to_payload()
+        result["major_radius_mm"] = mm_from_api(shape.major_radius)
+        result["minor_radius_mm"] = mm_from_api(shape.minor_radius)
         result["rotation_degrees"] = shape.rotation.degrees
 
     return result
 
 
-def apply_graphic_attributes(shape: Any, spec: dict[str, Any]) -> None:
-    """Apply stroke and fill properties from an item specification."""
-    stroke = spec.get("stroke") or {}
-    if "width_mm" in stroke:
-        shape.attributes.stroke.width = millimetres_from_mm(stroke["width_mm"])
-    if "style" in stroke:
-        shape.attributes.stroke.style = enum_value(StrokeLineStyle, stroke["style"])
-    if "filled" in spec:
-        shape.attributes.fill.filled = bool(spec["filled"])
+def graphic_from_spec(spec: GraphicSpec) -> SchematicGraphicShape:
+    """Create a symbol graphic item from a parsed specification."""
+    shape = _graphic_shape(spec.shape)
+    spec.apply(shape.attributes)
+
+    item = SchematicGraphicShape()
+    item.shape = shape
+
+    return item
 
 
-def _polyline_from_dict(data: dict[str, Any]) -> PolyLine:
+def _graphic_shape(
+    shape: SymbolShape,
+) -> Arc | Circle | Rectangle | Bezier | Polygon | Ellipse | EllipseArc:
+    match shape:
+        case ArcShape():
+            graphic = Arc()
+            graphic.start = shape.start.to_vector()
+            graphic.mid = shape.mid.to_vector()
+            graphic.end = shape.end.to_vector()
+            return graphic
+        case CircleShape():
+            graphic = Circle()
+            graphic.center = shape.center.to_vector()
+            graphic.radius_point = graphic.center + Vector2.from_xy_mm(
+                shape.radius_mm, 0.0
+            )
+            return graphic
+        case RectangleShape():
+            graphic = Rectangle()
+            graphic.top_left = shape.top_left.to_vector()
+            graphic.bottom_right = shape.bottom_right.to_vector()
+            return graphic
+        case BezierShape():
+            graphic = Bezier()
+            graphic.start = shape.start.to_vector()
+            graphic.control1 = shape.control1.to_vector()
+            graphic.control2 = shape.control2.to_vector()
+            graphic.end = shape.end.to_vector()
+            return graphic
+        case PolygonShape():
+            graphic = Polygon()
+            for outline in shape.polygons:
+                graphic.polygons.append(outline.to_geometry())
+            return graphic
+        case EllipseShape():
+            graphic = Ellipse()
+            graphic.center = shape.center.to_vector()
+            graphic.major_radius = api_from_mm(shape.major_radius_mm)
+            graphic.minor_radius = api_from_mm(shape.minor_radius_mm)
+            graphic.rotation = Angle.from_degrees(shape.rotation_degrees)
+            return graphic
+        case EllipseArcShape():
+            graphic = EllipseArc()
+            graphic.center = shape.center.to_vector()
+            graphic.major_radius = api_from_mm(shape.major_radius_mm)
+            graphic.minor_radius = api_from_mm(shape.minor_radius_mm)
+            graphic.rotation = Angle.from_degrees(shape.rotation_degrees)
+            graphic.start_angle = Angle.from_degrees(shape.start_angle_degrees)
+            graphic.end_angle = Angle.from_degrees(shape.end_angle_degrees)
+            return graphic
+
+    raise ValueError("unsupported symbol graphic shape")
+
+
+def _parse_node(data: object, name: str) -> PolygonNode:
+    values = mapping(data, name)
+    arc = values.get("arc")
+
+    if arc is not None:
+        return ArcNode.parse(arc, f"{name}.arc")
+
+    return PointMm.parse(data, name)
+
+
+def _parse_hole(data: object, name: str) -> list[PointMm]:
+    return [PointMm.parse(point, f"{name}[]") for point in sequence(data, name)]
+
+
+def _polyline(nodes: Sequence[PolygonNode], *, closed: bool) -> PolyLine:
     line = PolyLine()
-    line.closed = bool(data.get("closed", False))
+    line.closed = closed
 
-    for node_spec in data.get("outline", []):
-        if "arc" in node_spec:
-            arc_spec = node_spec["arc"]
+    for node in nodes:
+        if isinstance(node, ArcNode):
             arc = ArcStartMidEnd()
-            arc.start = point_from_dict(arc_spec["start"])
-            arc.mid = point_from_dict(arc_spec["mid"])
-            arc.end = point_from_dict(arc_spec["end"])
-            node = PolyLineNode()
-            node.arc = arc
+            arc.start = node.start.to_vector()
+            arc.mid = node.mid.to_vector()
+            arc.end = node.end.to_vector()
+            polyline_node = PolyLineNode()
+            polyline_node.arc = arc
         else:
-            node = PolyLineNode.from_point(point_from_dict(node_spec))
+            polyline_node = PolyLineNode.from_point(node.to_vector())
 
-        line.append(node)
+        line.append(polyline_node)
 
     return line
-
-
-def _polygon_from_dict(data: dict[str, Any]) -> PolygonWithHoles:
-    polygon = PolygonWithHoles(auto_close=False)
-    polygon.outline = _polyline_from_dict(data)
-
-    for hole in data.get("holes", []):
-        polygon.holes.append(_polyline_from_dict({"outline": hole, "closed": True}))
-
-    return polygon
-
-
-def graphic_from_spec(spec: dict[str, Any]) -> SchematicGraphicShape:
-    """Create a symbol graphic shape from the MCP-facing item shape."""
-    shape_name = str(spec.get("shape", "")).lower()
-    item = SchematicGraphicShape()
-
-    if shape_name == "segment":
-        raise ValueError(
-            "symbol graphics do not support segments; use a polygon with two points"
-        )
-    if shape_name == "arc":
-        shape: Any = Arc()
-        shape.start = point_from_dict(spec["start"])
-        shape.mid = point_from_dict(spec["mid"])
-        shape.end = point_from_dict(spec["end"])
-    elif shape_name == "circle":
-        shape = Circle()
-        shape.center = point_from_dict(spec["center"])
-        shape.radius_point = shape.center + Vector2.from_xy_mm(
-            float(spec["radius_mm"]), 0.0
-        )
-    elif shape_name == "rectangle":
-        shape = Rectangle()
-        shape.top_left = point_from_dict(spec["top_left"])
-        shape.bottom_right = point_from_dict(spec["bottom_right"])
-    elif shape_name == "bezier":
-        shape = Bezier()
-        shape.start = point_from_dict(spec["start"])
-        shape.control1 = point_from_dict(spec["control1"])
-        shape.control2 = point_from_dict(spec["control2"])
-        shape.end = point_from_dict(spec["end"])
-    elif shape_name == "polygon":
-        shape = Polygon()
-        for polygon_spec in spec.get("polygons", []):
-            shape.polygons.append(_polygon_from_dict(polygon_spec))
-    elif shape_name == "ellipse":
-        shape = Ellipse()
-        shape.center = point_from_dict(spec["center"])
-        shape.major_radius = millimetres_from_mm(spec["major_radius_mm"])
-        shape.minor_radius = millimetres_from_mm(spec["minor_radius_mm"])
-        if "rotation_degrees" in spec:
-            shape.rotation = Angle.from_degrees(float(spec["rotation_degrees"]))
-    elif shape_name == "ellipse_arc":
-        shape = EllipseArc()
-        shape.center = point_from_dict(spec["center"])
-        shape.major_radius = millimetres_from_mm(spec["major_radius_mm"])
-        shape.minor_radius = millimetres_from_mm(spec["minor_radius_mm"])
-        if "rotation_degrees" in spec:
-            shape.rotation = Angle.from_degrees(float(spec["rotation_degrees"]))
-        shape.start_angle = Angle.from_degrees(
-            float(spec.get("start_angle_degrees", 0.0))
-        )
-        shape.end_angle = Angle.from_degrees(float(spec.get("end_angle_degrees", 0.0)))
-    else:
-        raise ValueError(f"unsupported graphic shape {shape_name!r}")
-
-    apply_graphic_attributes(shape, spec)
-    item.shape = shape
-    return item

@@ -4,23 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from kipy.errors import ApiError, ConnectionError
+from kipy import KiCad
+from kipy.errors import ApiError
 from kipy.proto.common import ApiStatusCode
 
 from kicad_minimal_mcp.app import mcp
-from kicad_minimal_mcp.connection import kicad_client
 from kicad_minimal_mcp.documents import (
     DOCUMENT_TYPES,
     document_to_dict,
     normalise_document_type,
 )
-from kicad_minimal_mcp.results import (
-    STATUS_ERROR,
-    STATUS_INVALID_REQUEST,
-    STATUS_KICAD_ERROR,
-    STATUS_KICAD_UNAVAILABLE,
-    complete_result,
-)
+from kicad_minimal_mcp.results import Payload, ToolResult
+from kicad_minimal_mcp.tools.runner import run_tool
+from kicad_minimal_mcp.type_filters import ALL_TYPES
 
 
 @mcp.tool()
@@ -41,46 +37,28 @@ def get_open_documents(document_type: str = "all") -> dict[str, Any]:
     This never raises for an unavailable KiCad instance; inspect the
     ``connected`` field in the result instead.
     """
-    try:
-        requested_type = normalise_document_type(document_type)
-    except ValueError as exc:
-        return complete_result(
-            {
-                "ok": False,
-                "status": STATUS_INVALID_REQUEST,
-                "retryable": False,
-                "connected": False,
-                "document_type": document_type,
-                "count": 0,
-                "documents": [],
-                "unavailable_document_types": [],
-                "error": str(exc),
-            },
-            status=STATUS_INVALID_REQUEST,
-        )
+    result = ToolResult(
+        body={
+            "document_type": document_type,
+            "count": 0,
+            "documents": [],
+            "unavailable_document_types": [],
+        }
+    )
 
-    result: dict[str, Any] = {
-        "ok": False,
-        "status": "ok",
-        "retryable": False,
-        "connected": False,
-        "document_type": requested_type,
-        "count": 0,
-        "documents": [],
-        "unavailable_document_types": [],
-        "error": None,
-    }
+    def list_documents(kicad: KiCad) -> None:
+        requested = normalise_document_type(document_type)
+        if requested is None:
+            candidates = list(DOCUMENT_TYPES.items())
+            result.body["document_type"] = ALL_TYPES
+        else:
+            candidates = [(requested, DOCUMENT_TYPES[requested])]
+            result.body["document_type"] = str(requested)
 
-    kicad = kicad_client()
+        documents: list[Payload] = []
+        unavailable: list[str] = []
 
-    try:
-        types = (
-            DOCUMENT_TYPES.items()
-            if requested_type == "all"
-            else [(requested_type, DOCUMENT_TYPES[requested_type])]
-        )
-        documents: list[dict[str, Any]] = []
-        for type_name, proto_type in types:
+        for type_name, proto_type in candidates:
             try:
                 open_documents = kicad.get_open_documents(proto_type)
             except ApiError as exc:
@@ -89,26 +67,14 @@ def get_open_documents(document_type: str = "all") -> dict[str, Any]:
                 # expected state, not a failure of the whole query.
                 if exc.code != ApiStatusCode.AS_UNHANDLED:
                     raise
-                result["unavailable_document_types"].append(type_name)
+                unavailable.append(str(type_name))
                 continue
 
             documents.extend(document_to_dict(document) for document in open_documents)
-        result["connected"] = True
-        result["documents"] = documents
-        result["count"] = len(documents)
 
-    except ConnectionError as exc:
-        result["error"] = str(exc)
-        return complete_result(
-            result,
-            status=STATUS_KICAD_UNAVAILABLE,
-            retryable=True,
-        )
-    except ApiError as exc:
-        result["error"] = str(exc)
-        return complete_result(result, status=STATUS_KICAD_ERROR)
-    except Exception as exc:  # noqa: BLE001 - defensive at the MCP boundary
-        result["error"] = f"{type(exc).__name__}: {exc}"
-        return complete_result(result, status=STATUS_ERROR)
+        result.connected = True
+        result.body["documents"] = documents
+        result.body["count"] = len(documents)
+        result.body["unavailable_document_types"] = unavailable
 
-    return complete_result(result)
+    return run_tool(result, list_documents)

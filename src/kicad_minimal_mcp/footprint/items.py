@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any
+from enum import StrEnum
 
-from kipy.board_types import (
-    BoardShape,
-    BoardText,
-    BoardTextBox,
-    Field,
-    Pad,
-)
+from kipy.board_types import BoardItem, BoardShape, BoardText, BoardTextBox, Field, Pad
 from kipy.proto.common.types import KiCadObjectType
 
-from kicad_minimal_mcp.footprint.graphics import graphic_from_spec, graphic_to_dict
-from kicad_minimal_mcp.footprint.pads import pad_from_spec, pad_to_dict
+from kicad_minimal_mcp.footprint.graphics import (
+    GraphicSpec,
+    graphic_from_spec,
+    graphic_to_dict,
+)
+from kicad_minimal_mcp.footprint.pads import PadSpec, pad_from_spec, pad_to_dict
 from kicad_minimal_mcp.footprint.text import (
+    FieldSpec,
+    TextBoxSpec,
+    TextSpec,
     field_from_spec,
     field_to_dict,
     text_box_from_spec,
@@ -23,93 +24,123 @@ from kicad_minimal_mcp.footprint.text import (
     text_from_spec,
     text_to_dict,
 )
-
-ITEM_TYPES = {
-    "pad": KiCadObjectType.KOT_PCB_PAD,
-    "field": KiCadObjectType.KOT_PCB_FIELD,
-    "text": KiCadObjectType.KOT_PCB_TEXT,
-    "text_box": KiCadObjectType.KOT_PCB_TEXTBOX,
-    "graphic": KiCadObjectType.KOT_PCB_SHAPE,
-    "zone": KiCadObjectType.KOT_PCB_ZONE,
-    "table": KiCadObjectType.KOT_PCB_TABLE,
-    "barcode": KiCadObjectType.KOT_PCB_BARCODE,
-    "dimension": KiCadObjectType.KOT_PCB_DIMENSION,
-    "group": KiCadObjectType.KOT_PCB_GROUP,
-}
-
-_ITEM_TYPE_ALIASES = {
-    "pads": "pad",
-    "fields": "field",
-    "texts": "text",
-    "textbox": "text_box",
-    "text-box": "text_box",
-    "textboxes": "text_box",
-    "text_boxes": "text_box",
-    "graphics": "graphic",
-    "shape": "graphic",
-    "shapes": "graphic",
-    "board_shape": "graphic",
-    "board_shapes": "graphic",
-    "zones": "zone",
-    "tables": "table",
-    "barcodes": "barcode",
-    "dimensions": "dimension",
-    "groups": "group",
-}
+from kicad_minimal_mcp.identifiers import ItemId
+from kicad_minimal_mcp.parsing import mapping, required, text
+from kicad_minimal_mcp.results import Payload
+from kicad_minimal_mcp.type_filters import Category, TypeFilter
 
 
-def normalise_item_type(item_type: str) -> str:
+class FootprintItemType(StrEnum):
+    """The item types a footprint read can filter on."""
+
+    BARCODE = "barcode"
+    DIMENSION = "dimension"
+    FIELD = "field"
+    GRAPHIC = "graphic"
+    GROUP = "group"
+    OTHER = "other"
+    PAD = "pad"
+    TABLE = "table"
+    TEXT = "text"
+    TEXT_BOX = "text_box"
+    ZONE = "zone"
+
+
+ITEM_TYPES = TypeFilter(
+    noun="item type",
+    prefix="kot_pcb_",
+    values={
+        FootprintItemType.PAD: KiCadObjectType.KOT_PCB_PAD,
+        FootprintItemType.FIELD: KiCadObjectType.KOT_PCB_FIELD,
+        FootprintItemType.TEXT: KiCadObjectType.KOT_PCB_TEXT,
+        FootprintItemType.TEXT_BOX: KiCadObjectType.KOT_PCB_TEXTBOX,
+        FootprintItemType.GRAPHIC: KiCadObjectType.KOT_PCB_SHAPE,
+        FootprintItemType.ZONE: KiCadObjectType.KOT_PCB_ZONE,
+        FootprintItemType.TABLE: KiCadObjectType.KOT_PCB_TABLE,
+        FootprintItemType.BARCODE: KiCadObjectType.KOT_PCB_BARCODE,
+        FootprintItemType.DIMENSION: KiCadObjectType.KOT_PCB_DIMENSION,
+        FootprintItemType.GROUP: KiCadObjectType.KOT_PCB_GROUP,
+    },
+    aliases={
+        "barcodes": FootprintItemType.BARCODE,
+        "board_shape": FootprintItemType.GRAPHIC,
+        "board_shapes": FootprintItemType.GRAPHIC,
+        "dimensions": FootprintItemType.DIMENSION,
+        "fields": FootprintItemType.FIELD,
+        "graphics": FootprintItemType.GRAPHIC,
+        "groups": FootprintItemType.GROUP,
+        "pads": FootprintItemType.PAD,
+        "shape": FootprintItemType.GRAPHIC,
+        "shapes": FootprintItemType.GRAPHIC,
+        "tables": FootprintItemType.TABLE,
+        "text_boxes": FootprintItemType.TEXT_BOX,
+        "textbox": FootprintItemType.TEXT_BOX,
+        "textboxes": FootprintItemType.TEXT_BOX,
+        "texts": FootprintItemType.TEXT,
+        "zones": FootprintItemType.ZONE,
+    },
+    plurals={
+        FootprintItemType.PAD: Category.PADS,
+        FootprintItemType.FIELD: Category.FIELDS,
+        FootprintItemType.TEXT: Category.TEXTS,
+        FootprintItemType.TEXT_BOX: Category.TEXT_BOXES,
+        FootprintItemType.GRAPHIC: Category.GRAPHICS,
+    },
+)
+
+
+def normalise_item_type(item_type: str) -> FootprintItemType | None:
     """Return the canonical name for a footprint item-type filter."""
-    value = item_type.strip().lower().replace(" ", "_").replace("-", "_")
-    if value.startswith("kot_pcb_"):
-        value = value.removeprefix("kot_pcb_")
-    value = _ITEM_TYPE_ALIASES.get(value, value)
-    if value not in {"all", *ITEM_TYPES}:
-        supported = ", ".join(("all", *ITEM_TYPES))
-        raise ValueError(
-            f"Unsupported item type {item_type!r}; expected one of: {supported}"
-        )
-    return value
+    return ITEM_TYPES.normalise(item_type)
 
 
-def item_category(item: Any) -> str:
-    """Return the summary category used for a footprint item."""
+def item_type_of(item: BoardItem) -> FootprintItemType:
+    """Return the canonical item type for a footprint item."""
     if isinstance(item, Pad):
-        return "pads"
+        return FootprintItemType.PAD
     if isinstance(item, Field):
-        return "fields"
+        return FootprintItemType.FIELD
     if isinstance(item, BoardText):
-        return "texts"
+        return FootprintItemType.TEXT
     if isinstance(item, BoardTextBox):
-        return "text_boxes"
+        return FootprintItemType.TEXT_BOX
     if isinstance(item, BoardShape):
-        return "graphics"
-    return "other"
+        return FootprintItemType.GRAPHIC
+
+    return FootprintItemType.OTHER
 
 
-_ITEM_CATEGORIES = {
-    "pad": "pads",
-    "field": "fields",
-    "text": "texts",
-    "text_box": "text_boxes",
-    "graphic": "graphics",
-}
+def item_category(item: BoardItem) -> Category:
+    """Return the summary category used for a footprint item."""
+    category = ITEM_TYPES.plural(item_type_of(item))
+    if category is None:
+        return Category.OTHER
+
+    return category
 
 
-def item_matches_type(item: Any, item_type: str) -> bool:
+def item_matches_type(item: BoardItem, item_type: FootprintItemType) -> bool:
     """Return whether an item matches a canonical item-type filter."""
-    if item_type == "all":
-        return True
-
-    category = _ITEM_CATEGORIES.get(item_type)
+    category = ITEM_TYPES.plural(item_type)
     if category is not None:
         return item_category(item) == category
 
-    value = item_to_dict(item).get("type")
-    return isinstance(value, str) and value.lower() == item_type
+    return item_type_of(item) == item_type
 
 
-def item_to_dict(item: Any) -> dict[str, Any]:
+def item_uuid(item: BoardItem) -> ItemId:
+    """Return the UUID KiCad uses to address ``item``.
+
+    Footprint fields are addressed by the UUID of their text, not by ``Field.id``,
+    which is the ``FieldId`` enum for mandatory field types.
+    """
+    if isinstance(item, Field):
+        return item.text.id.value
+
+    return item.id.value
+
+
+def item_to_dict(item: BoardItem) -> Payload:
     """Convert a footprint item to the MCP-facing dictionary shape."""
     if isinstance(item, Pad):
         return pad_to_dict(item)
@@ -121,25 +152,48 @@ def item_to_dict(item: Any) -> dict[str, Any]:
         return text_box_to_dict(item)
     if isinstance(item, BoardShape):
         return graphic_to_dict(item)
-    return {
-        "type": type(item).__name__,
-        "id": getattr(getattr(item, "id", None), "value", None),
-    }
+
+    identifier = getattr(getattr(item, "id", None), "value", None)
+
+    return {"type": str(item_type_of(item)), "id": identifier}
 
 
-def item_from_spec(spec: dict[str, Any]) -> Any:
-    """Create a KiCad footprint item from the MCP-facing item shape."""
-    item_type = str(spec.get("type", "")).lower()
+#: The item specifications a footprint writer accepts.
+ItemSpec = PadSpec | FieldSpec | TextSpec | TextBoxSpec | GraphicSpec
 
-    if item_type == "pad":
-        return pad_from_spec(spec)
-    if item_type == "field":
-        return field_from_spec(spec)
-    if item_type == "text":
-        return text_from_spec(spec)
-    if item_type == "text_box":
-        return text_box_from_spec(spec)
-    if item_type == "graphic":
-        return graphic_from_spec(spec)
 
-    raise ValueError(f"unsupported item type {item_type!r}")
+def item_from_spec(spec: ItemSpec) -> BoardItem:
+    """Create a KiCad footprint item from a parsed item specification."""
+    match spec:
+        case PadSpec():
+            return pad_from_spec(spec)
+        case FieldSpec():
+            return field_from_spec(spec)
+        case TextSpec():
+            return text_from_spec(spec)
+        case TextBoxSpec():
+            return text_box_from_spec(spec)
+        case GraphicSpec():
+            return graphic_from_spec(spec)
+
+    raise ValueError("unsupported item specification")
+
+
+def parse_item_spec(data: object) -> ItemSpec:
+    """Parse the MCP-facing item shape into a typed specification."""
+    values = mapping(data, "item specification")
+    kind = text(required(values, "type", "item specification"), "item.type").lower()
+
+    match kind:
+        case "pad":
+            return PadSpec.parse(values)
+        case "field":
+            return FieldSpec.parse(values)
+        case "text":
+            return TextSpec.parse(values)
+        case "text_box":
+            return TextBoxSpec.parse(values)
+        case "graphic":
+            return GraphicSpec.parse(values)
+
+    raise ValueError(f"unsupported item type {kind!r}")

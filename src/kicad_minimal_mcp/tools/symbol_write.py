@@ -4,24 +4,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from kipy.errors import ApiError, ConnectionError
-from kipy.proto.common import ApiStatusCode
+from kipy import KiCad
 
 from kicad_minimal_mcp.app import mcp
-from kicad_minimal_mcp.connection import kicad_client
 from kicad_minimal_mcp.documents import document_to_dict, find_symbol_document
-from kicad_minimal_mcp.results import (
-    STATUS_ERROR,
-    STATUS_INVALID_REQUEST,
-    STATUS_KICAD_ERROR,
-    STATUS_KICAD_UNAVAILABLE,
-    STATUS_SYMBOL_UNAVAILABLE,
-    complete_result,
-)
+from kicad_minimal_mcp.results import Status, ToolResult
 from kicad_minimal_mcp.symbol.editor import (
     apply_item_specs,
     delete_items_by_id,
     symbol_editor,
+)
+from kicad_minimal_mcp.symbol.items import parse_item_spec
+from kicad_minimal_mcp.tools.runner import (
+    open_document,
+    requested_library_id,
+    run_tool,
 )
 
 
@@ -40,70 +37,36 @@ def delete_symbol_items(
     ID is reported in ``deleted_items`` with the status KiCad returned and
     whether the item is actually gone afterwards.
     """
-    result: dict[str, Any] = {
-        "ok": False,
-        "status": "ok",
-        "retryable": False,
-        "applied": False,
-        "committed": False,
-        "connected": False,
-        "symbol": None,
-        "item_ids": item_ids,
-        "saved": False,
-        "removed_count": 0,
-        "not_removed_count": 0,
-        "deleted_items": [],
-        "final_count": 0,
-        "final_summary": {},
-        "error": None,
-    }
+    result = ToolResult(
+        body={
+            "applied": False,
+            "committed": False,
+            "symbol": None,
+            "item_ids": item_ids,
+            "saved": False,
+            "removed_count": 0,
+            "not_removed_count": 0,
+            "deleted_items": [],
+            "final_count": 0,
+            "final_summary": {},
+        }
+    )
 
-    kicad = kicad_client()
-
-    try:
-        try:
-            document = find_symbol_document(kicad, lib_id)
-        except ValueError as exc:
-            result["error"] = str(exc)
-            return complete_result(
-                result,
-                status=STATUS_SYMBOL_UNAVAILABLE,
-                retryable=True,
-            )
-        except ApiError as exc:
-            if exc.code != ApiStatusCode.AS_UNHANDLED:
-                raise
-            result["connected"] = True
-            result["error"] = "no symbol editor is open in KiCad"
-            return complete_result(
-                result,
-                status=STATUS_SYMBOL_UNAVAILABLE,
-                retryable=True,
-            )
-
-        result["connected"] = True
-        result["symbol"] = document_to_dict(document)
-        editor = symbol_editor(kicad, document)
-        result.update(delete_items_by_id(editor, item_ids, save=save))
-
-    except ValueError as exc:
-        result["error"] = str(exc)
-        return complete_result(result, status=STATUS_INVALID_REQUEST)
-    except ConnectionError as exc:
-        result["error"] = str(exc)
-        return complete_result(
-            result,
-            status=STATUS_KICAD_UNAVAILABLE,
-            retryable=True,
+    def delete(kicad: KiCad) -> None:
+        document = open_document(
+            kicad,
+            find_symbol_document,
+            requested_library_id(lib_id),
+            noun="symbol",
+            unavailable_status=Status.SYMBOL_UNAVAILABLE,
         )
-    except ApiError as exc:
-        result["error"] = str(exc)
-        return complete_result(result, status=STATUS_KICAD_ERROR)
-    except Exception as exc:  # noqa: BLE001 - defensive at the MCP boundary
-        result["error"] = f"{type(exc).__name__}: {exc}"
-        return complete_result(result, status=STATUS_ERROR)
+        result.connected = True
+        result.body["symbol"] = document_to_dict(document)
 
-    return complete_result(result)
+        editor = symbol_editor(kicad, document)
+        result.body.update(delete_items_by_id(editor, item_ids, save=save).to_payload())
+
+    return run_tool(result, delete)
 
 
 @mcp.tool()
@@ -142,75 +105,45 @@ def write_symbol_items(
     or any IPC command fails before the commit is pushed, the pending commit is
     dropped.
     """
-    result: dict[str, Any] = {
-        "ok": False,
-        "status": "ok",
-        "retryable": False,
-        "applied": False,
-        "committed": False,
-        "connected": False,
-        "symbol": None,
-        "replace_existing": replace_existing,
-        "saved": False,
-        "removed_count": 0,
-        "updated_count": 0,
-        "created_count": 0,
-        "created_items": [],
-        "final_count": 0,
-        "final_summary": {},
-        "error": None,
-    }
+    result = ToolResult(
+        body={
+            "applied": False,
+            "committed": False,
+            "symbol": None,
+            "replace_existing": replace_existing,
+            "saved": False,
+            "removed_count": 0,
+            "updated_count": 0,
+            "created_count": 0,
+            "created_items": [],
+            "final_count": 0,
+            "final_summary": {},
+        }
+    )
 
-    kicad = kicad_client()
+    def write(kicad: KiCad) -> None:
+        document = open_document(
+            kicad,
+            find_symbol_document,
+            requested_library_id(lib_id),
+            noun="symbol",
+            unavailable_status=Status.SYMBOL_UNAVAILABLE,
+        )
+        result.connected = True
+        result.body["symbol"] = document_to_dict(document)
 
-    try:
-        try:
-            document = find_symbol_document(kicad, lib_id)
-        except ValueError as exc:
-            result["error"] = str(exc)
-            return complete_result(
-                result,
-                status=STATUS_SYMBOL_UNAVAILABLE,
-                retryable=True,
-            )
-        except ApiError as exc:
-            if exc.code != ApiStatusCode.AS_UNHANDLED:
-                raise
-            result["connected"] = True
-            result["error"] = "no symbol editor is open in KiCad"
-            return complete_result(
-                result,
-                status=STATUS_SYMBOL_UNAVAILABLE,
-                retryable=True,
-            )
-
-        result["connected"] = True
-        result["symbol"] = document_to_dict(document)
         editor = symbol_editor(kicad, document)
-        result.update(
+        symbol = editor.get_symbol()
+
+        specs = [parse_item_spec(item) for item in items]
+        result.body.update(
             apply_item_specs(
                 editor,
-                items,
+                symbol,
+                specs,
                 replace_existing=replace_existing,
                 save=save,
-            )
+            ).to_payload()
         )
 
-    except ValueError as exc:
-        result["error"] = str(exc)
-        return complete_result(result, status=STATUS_INVALID_REQUEST)
-    except ConnectionError as exc:
-        result["error"] = str(exc)
-        return complete_result(
-            result,
-            status=STATUS_KICAD_UNAVAILABLE,
-            retryable=True,
-        )
-    except ApiError as exc:
-        result["error"] = str(exc)
-        return complete_result(result, status=STATUS_KICAD_ERROR)
-    except Exception as exc:  # noqa: BLE001 - defensive at the MCP boundary
-        result["error"] = f"{type(exc).__name__}: {exc}"
-        return complete_result(result, status=STATUS_ERROR)
-
-    return complete_result(result)
+    return run_tool(result, write)

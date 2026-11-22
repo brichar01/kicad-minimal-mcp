@@ -2,132 +2,186 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass, field
 
 from kipy.board_types import BoardText, BoardTextBox, Field
 from kipy.proto.board.board_types_pb2 import BoardLayer
-from kipy.proto.common.types.enums_pb2 import (
-    HorizontalAlignment,
-    VerticalAlignment,
+
+from kicad_minimal_mcp.enums import enum_converter
+from kicad_minimal_mcp.identifiers import ItemId
+from kicad_minimal_mcp.parsing import (
+    boolean,
+    converted,
+    integer,
+    mapping,
+    optional,
+    text,
 )
-
-from kicad_minimal_mcp.enums import enum_value
-from kicad_minimal_mcp.units import (
-    millimetres_from_mm,
-    mm,
-    point_from_dict,
-    point_to_dict,
-    size_from_dict,
-    size_to_dict,
+from kicad_minimal_mcp.results import Payload
+from kicad_minimal_mcp.text_attributes import (
+    TextAttributesSpec,
+    text_attributes_to_dict,
 )
+from kicad_minimal_mcp.units import PointMm
 
 
-def text_attributes_to_dict(attributes: Any) -> dict[str, Any]:
-    return {
-        "size": size_to_dict(attributes.size),
-        "thickness_mm": mm(attributes.stroke_width),
-        "angle_degrees": attributes.angle,
-        "bold": attributes.bold,
-        "italic": attributes.italic,
-        "mirrored": attributes.mirrored,
-        "keep_upright": attributes.keep_upright,
-        "horizontal_alignment": HorizontalAlignment.Name(
-            attributes.horizontal_alignment
-        ),
-        "vertical_alignment": VerticalAlignment.Name(attributes.vertical_alignment),
-    }
+@dataclass(frozen=True)
+class FieldSpec:
+    """A footprint field to create or update."""
 
+    position: PointMm
+    value: str = ""
+    field_id: int = 0
+    name: str = ""
+    visible: bool = True
+    layer: BoardLayer.ValueType = BoardLayer.BL_F_Fab
+    attributes: TextAttributesSpec = field(default_factory=TextAttributesSpec)
+    id: ItemId | None = None
 
-def apply_text_attributes(attributes: Any, spec: dict[str, Any]) -> None:
-    if "size" in spec:
-        attributes.size = size_from_dict(spec["size"])
-    if "thickness_mm" in spec:
-        attributes.stroke_width = millimetres_from_mm(spec["thickness_mm"])
-    if "angle_degrees" in spec:
-        attributes.angle = float(spec["angle_degrees"])
-    if "bold" in spec:
-        attributes.bold = bool(spec["bold"])
-    if "italic" in spec:
-        attributes.italic = bool(spec["italic"])
-    if "mirrored" in spec:
-        attributes.mirrored = bool(spec["mirrored"])
-    if "keep_upright" in spec:
-        attributes.keep_upright = bool(spec["keep_upright"])
-    if "horizontal_alignment" in spec:
-        attributes.horizontal_alignment = enum_value(
-            HorizontalAlignment, spec["horizontal_alignment"]
-        )
-    if "vertical_alignment" in spec:
-        attributes.vertical_alignment = enum_value(
-            VerticalAlignment, spec["vertical_alignment"]
+    @classmethod
+    def parse(cls, data: object, name: str = "field") -> FieldSpec:
+        """Parse a field object arriving at the MCP boundary."""
+        values = mapping(data, name)
+        layer = optional(values, "layer", enum_converter(BoardLayer), name)
+        visible = optional(values, "visible", boolean, name)
+
+        return cls(
+            position=converted(values, "position", PointMm.parse, name),
+            value=optional(values, "text", text, name) or "",
+            field_id=optional(values, "field_id", integer, name) or 0,
+            name=optional(values, "name", text, name) or "",
+            visible=True if visible is None else visible,
+            layer=BoardLayer.BL_F_Fab if layer is None else layer,
+            attributes=optional(values, "attributes", TextAttributesSpec.parse, name)
+            or TextAttributesSpec(),
+            id=optional(values, "id", text, name),
         )
 
 
-def field_to_dict(field: Field) -> dict[str, Any]:
-    text = field.text
+@dataclass(frozen=True)
+class TextSpec:
+    """A footprint text item to create or update."""
+
+    position: PointMm
+    value: str = ""
+    layer: BoardLayer.ValueType = BoardLayer.BL_F_Fab
+    attributes: TextAttributesSpec = field(default_factory=TextAttributesSpec)
+    id: ItemId | None = None
+
+    @classmethod
+    def parse(cls, data: object, name: str = "text") -> TextSpec:
+        """Parse a text object arriving at the MCP boundary."""
+        values = mapping(data, name)
+        layer = optional(values, "layer", enum_converter(BoardLayer), name)
+
+        return cls(
+            position=converted(values, "position", PointMm.parse, name),
+            value=optional(values, "text", text, name) or "",
+            layer=BoardLayer.BL_F_Fab if layer is None else layer,
+            attributes=optional(values, "attributes", TextAttributesSpec.parse, name)
+            or TextAttributesSpec(),
+            id=optional(values, "id", text, name),
+        )
+
+
+@dataclass(frozen=True)
+class TextBoxSpec:
+    """A footprint text box to create or update."""
+
+    top_left: PointMm
+    bottom_right: PointMm
+    value: str = ""
+    layer: BoardLayer.ValueType = BoardLayer.BL_F_Fab
+    attributes: TextAttributesSpec = field(default_factory=TextAttributesSpec)
+    id: ItemId | None = None
+
+    @classmethod
+    def parse(cls, data: object, name: str = "text box") -> TextBoxSpec:
+        """Parse a text box object arriving at the MCP boundary."""
+        values = mapping(data, name)
+        layer = optional(values, "layer", enum_converter(BoardLayer), name)
+
+        return cls(
+            top_left=converted(values, "top_left", PointMm.parse, name),
+            bottom_right=converted(values, "bottom_right", PointMm.parse, name),
+            value=optional(values, "text", text, name) or "",
+            layer=BoardLayer.BL_F_Fab if layer is None else layer,
+            attributes=optional(values, "attributes", TextAttributesSpec.parse, name)
+            or TextAttributesSpec(),
+            id=optional(values, "id", text, name),
+        )
+
+
+def field_to_dict(item: Field) -> Payload:
+    item_text = item.text
+
     return {
         "type": "field",
-        "id": field.text.id.value,
-        "field_id": field.field_id,
-        "name": field.name,
-        "text": text.value,
-        "visible": field.visible,
-        "layer": BoardLayer.Name(field.layer),
-        "position": point_to_dict(text.position),
-        "attributes": text_attributes_to_dict(text.attributes),
+        "id": item.text.id.value,
+        "field_id": item.field_id,
+        "name": item.name,
+        "text": item_text.value,
+        "visible": item.visible,
+        "layer": BoardLayer.Name(item.layer),
+        "position": PointMm.from_vector(item_text.position).to_payload(),
+        "attributes": text_attributes_to_dict(item_text.attributes),
     }
 
 
-def text_to_dict(item: BoardText) -> dict[str, Any]:
+def text_to_dict(item: BoardText) -> Payload:
     return {
         "type": "text",
         "id": item.id.value,
         "text": item.value,
         "layer": BoardLayer.Name(item.layer),
-        "position": point_to_dict(item.position),
+        "position": PointMm.from_vector(item.position).to_payload(),
         "attributes": text_attributes_to_dict(item.attributes),
     }
 
 
-def text_box_to_dict(item: BoardTextBox) -> dict[str, Any]:
+def text_box_to_dict(item: BoardTextBox) -> Payload:
     return {
         "type": "text_box",
         "id": item.id.value,
         "text": item.value,
         "layer": BoardLayer.Name(item.layer),
-        "top_left": point_to_dict(item.top_left),
-        "bottom_right": point_to_dict(item.bottom_right),
+        "top_left": PointMm.from_vector(item.top_left).to_payload(),
+        "bottom_right": PointMm.from_vector(item.bottom_right).to_payload(),
         "attributes": text_attributes_to_dict(item.attributes),
     }
 
 
-def field_from_spec(spec: dict[str, Any]) -> Field:
-    field = Field()
-    field.proto.id.id = int(spec.get("field_id", 0))
-    field.name = str(spec.get("name", ""))
-    field.visible = bool(spec.get("visible", True))
-    field.layer = enum_value(BoardLayer, spec.get("layer", "BL_F_Fab"))
-    text = field.text
-    text.value = str(spec.get("text", ""))
-    text.position = point_from_dict(spec["position"])
-    apply_text_attributes(text.attributes, spec.get("attributes", {}))
-    return field
+def field_from_spec(spec: FieldSpec) -> Field:
+    item = Field()
+    item.proto.id.id = spec.field_id
+    item.name = spec.name
+    item.visible = spec.visible
+    item.layer = spec.layer
 
+    item_text = item.text
+    item_text.value = spec.value
+    item_text.position = spec.position.to_vector()
+    spec.attributes.apply(item_text.attributes)
 
-def text_from_spec(spec: dict[str, Any]) -> BoardText:
-    item = BoardText()
-    item.layer = enum_value(BoardLayer, spec.get("layer", "BL_F_Fab"))
-    item.value = str(spec.get("text", ""))
-    item.position = point_from_dict(spec["position"])
-    apply_text_attributes(item.attributes, spec.get("attributes", {}))
     return item
 
 
-def text_box_from_spec(spec: dict[str, Any]) -> BoardTextBox:
+def text_from_spec(spec: TextSpec) -> BoardText:
+    item = BoardText()
+    item.layer = spec.layer
+    item.value = spec.value
+    item.position = spec.position.to_vector()
+    spec.attributes.apply(item.attributes)
+
+    return item
+
+
+def text_box_from_spec(spec: TextBoxSpec) -> BoardTextBox:
     item = BoardTextBox()
-    item.layer = enum_value(BoardLayer, spec.get("layer", "BL_F_Fab"))
-    item.value = str(spec.get("text", ""))
-    item.top_left = point_from_dict(spec["top_left"])
-    item.bottom_right = point_from_dict(spec["bottom_right"])
-    apply_text_attributes(item.attributes, spec.get("attributes", {}))
+    item.layer = spec.layer
+    item.value = spec.value
+    item.top_left = spec.top_left.to_vector()
+    item.bottom_right = spec.bottom_right.to_vector()
+    spec.attributes.apply(item.attributes)
+
     return item

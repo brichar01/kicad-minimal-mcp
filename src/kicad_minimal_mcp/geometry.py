@@ -2,35 +2,93 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
-from kicad_minimal_mcp.units import point_to_dict
+from kipy.common_types import GraphicAttributes
+from kipy.geometry import PolygonWithHoles
+from kipy.proto.common.types.enums_pb2 import StrokeLineStyle
+
+from kicad_minimal_mcp.enums import enum_converter
+from kicad_minimal_mcp.parsing import mapping, number, optional
+from kicad_minimal_mcp.results import Payload
+from kicad_minimal_mcp.units import PointMm, api_from_mm
 
 
-def polygon_geometry_to_dict(item: Any) -> list[dict[str, Any]]:
+class HasPolygons(Protocol):
+    """The ``polygons`` view shared by the board and symbol polygon shapes."""
+
+    @property
+    def polygons(self) -> Sequence[PolygonWithHoles]: ...
+
+
+@dataclass(frozen=True)
+class StrokeSpec:
+    """The stroke a graphic shape is drawn with."""
+
+    width_mm: float | None = None
+    style: StrokeLineStyle.ValueType | None = None
+
+    @classmethod
+    def parse(cls, data: object, name: str = "stroke") -> StrokeSpec:
+        """Parse a stroke object arriving at the MCP boundary."""
+        values = mapping(data, name)
+
+        return cls(
+            width_mm=optional(values, "width_mm", number, name),
+            style=optional(values, "style", enum_converter(StrokeLineStyle), name),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class GraphicAppearance:
+    """The stroke and fill shared by every writable graphic shape."""
+
+    stroke: StrokeSpec | None = None
+    filled: bool | None = None
+
+    def apply(self, attributes: GraphicAttributes) -> None:
+        """Apply the stroke and fill this specification sets."""
+        if self.stroke is not None:
+            if self.stroke.width_mm is not None:
+                attributes.stroke.width = api_from_mm(self.stroke.width_mm)
+            if self.stroke.style is not None:
+                attributes.stroke.style = self.stroke.style
+
+        if self.filled is not None:
+            attributes.fill.filled = self.filled
+
+
+def polygon_geometry_to_dict(shape: HasPolygons) -> list[Payload]:
     """Convert a shape's ``polygons`` view to outlines, holes, and closed flags."""
-    polygons = []
-    for polygon in item.polygons:
-        outline = []
+    polygons: list[Payload] = []
+
+    for polygon in shape.polygons:
+        outline: list[Payload] = []
         for node in polygon.outline.nodes:
             if node.has_point:
-                outline.append(point_to_dict(node.point))
-            else:
-                outline.append(
-                    {
-                        "arc": {
-                            "start": point_to_dict(node.arc.start),
-                            "mid": point_to_dict(node.arc.mid),
-                            "end": point_to_dict(node.arc.end),
-                        }
-                    }
-                )
+                outline.append(PointMm.from_vector(node.point).to_payload())
+                continue
 
-        holes = []
-        for hole in polygon.holes:
-            holes.append(
-                [point_to_dict(node.point) for node in hole.nodes if node.has_point]
+            outline.append(
+                {
+                    "arc": {
+                        "start": PointMm.from_vector(node.arc.start).to_payload(),
+                        "mid": PointMm.from_vector(node.arc.mid).to_payload(),
+                        "end": PointMm.from_vector(node.arc.end).to_payload(),
+                    }
+                }
             )
+
+        holes = [
+            [
+                PointMm.from_vector(node.point).to_payload()
+                for node in hole.nodes
+                if node.has_point
+            ]
+            for hole in polygon.holes
+        ]
 
         polygons.append(
             {"outline": outline, "closed": polygon.outline.closed, "holes": holes}
