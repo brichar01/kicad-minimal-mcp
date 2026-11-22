@@ -13,8 +13,6 @@ from kicad_minimal_mcp.type_filters import TypeFilter
 
 
 class DocumentTypeName(StrEnum):
-    """The canonical document type names the tools accept and report."""
-
     DRAWING_SHEET = "drawing_sheet"
     FOOTPRINT = "footprint"
     PCB = "pcb"
@@ -50,12 +48,10 @@ DOCUMENT_TYPES = TypeFilter(
 
 
 def normalise_document_type(document_type: str) -> DocumentTypeName | None:
-    """Return the canonical name for an open-document type filter."""
     return DOCUMENT_TYPES.normalise(document_type)
 
 
 def document_to_dict(document: DocumentSpecifier) -> Payload:
-    """Convert a DocumentSpecifier protobuf into an MCP-friendly dictionary."""
     result: Payload = {
         "type": DocumentType.Name(document.type),
     }
@@ -125,7 +121,6 @@ def find_footprint_document(
 
 
 def find_symbol_document(kicad: KiCad, lib_id: LibraryId | None) -> DocumentSpecifier:
-    """Find an open symbol document, optionally selected by ``lib_id``."""
     return _find_library_document(
         kicad, DocumentType.DOCTYPE_SYMBOL, lib_id, noun="symbol"
     )

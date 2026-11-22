@@ -11,8 +11,6 @@ Payload = dict[str, Any]
 
 
 class Status(StrEnum):
-    """The outcome codes the tools report."""
-
     ERROR = "error"
     FOOTPRINT_UNAVAILABLE = "footprint_unavailable"
     INVALID_REQUEST = "invalid_request"
@@ -24,8 +22,6 @@ class Status(StrEnum):
 
 @dataclass
 class ToolResult:
-    """The outcome of one tool call and the body the tool returns."""
-
     body: Payload
     status: Status = Status.OK
     retryable: bool = False

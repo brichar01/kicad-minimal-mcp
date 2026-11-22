@@ -29,8 +29,6 @@ from kicad_minimal_mcp.units import PointMm, SizeMm
 
 @dataclass(frozen=True)
 class CopperLayerSpec:
-    """The shape one copper layer of a padstack takes."""
-
     layer: BoardLayer.ValueType
     shape: PadStackShape.ValueType | None = None
     size: SizeMm | None = None
@@ -39,7 +37,6 @@ class CopperLayerSpec:
 
     @classmethod
     def parse(cls, data: object, name: str) -> CopperLayerSpec:
-        """Parse one copper layer object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -53,7 +50,6 @@ class CopperLayerSpec:
         )
 
     def apply(self, copper_layer: PadStackLayer) -> None:
-        """Apply the values this specification sets."""
         if self.shape is not None:
             copper_layer.shape = self.shape
         if self.size is not None:
@@ -66,8 +62,6 @@ class CopperLayerSpec:
 
 @dataclass(frozen=True)
 class DrillSpec:
-    """The drilled hole of a padstack."""
-
     diameter: SizeMm | None = None
     shape: DrillShape.ValueType | None = None
     start_layer: BoardLayer.ValueType | None = None
@@ -75,7 +69,6 @@ class DrillSpec:
 
     @classmethod
     def parse(cls, data: object, name: str = "drill") -> DrillSpec:
-        """Parse a drill object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -88,7 +81,6 @@ class DrillSpec:
         )
 
     def apply(self, drill: DrillProperties) -> None:
-        """Apply the values this specification sets."""
         if self.diameter is not None:
             drill.diameter = self.diameter.to_vector()
         if self.shape is not None:
@@ -101,8 +93,6 @@ class DrillSpec:
 
 @dataclass(frozen=True)
 class PadSpec:
-    """A pad to create or update."""
-
     position: PointMm
     pad_type: PadType.ValueType = PadType.PT_SMD
     number: str = ""
@@ -114,7 +104,6 @@ class PadSpec:
 
     @classmethod
     def parse(cls, data: object, name: str = "pad") -> PadSpec:
-        """Parse a pad object arriving at the MCP boundary."""
         values = mapping(data, name)
         pad_type = optional(values, "pad_type", enum_converter(PadType), name)
         number = optional(values, "number", text, name)

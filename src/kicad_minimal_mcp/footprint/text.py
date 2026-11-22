@@ -27,8 +27,6 @@ from kicad_minimal_mcp.units import PointMm
 
 @dataclass(frozen=True)
 class FieldSpec:
-    """A footprint field to create or update."""
-
     position: PointMm
     value: str = ""
     field_id: int = 0
@@ -40,7 +38,6 @@ class FieldSpec:
 
     @classmethod
     def parse(cls, data: object, name: str = "field") -> FieldSpec:
-        """Parse a field object arriving at the MCP boundary."""
         values = mapping(data, name)
         layer = optional(values, "layer", enum_converter(BoardLayer), name)
         visible = optional(values, "visible", boolean, name)
@@ -60,8 +57,6 @@ class FieldSpec:
 
 @dataclass(frozen=True)
 class TextSpec:
-    """A footprint text item to create or update."""
-
     position: PointMm
     value: str = ""
     layer: BoardLayer.ValueType = BoardLayer.BL_F_Fab
@@ -70,7 +65,6 @@ class TextSpec:
 
     @classmethod
     def parse(cls, data: object, name: str = "text") -> TextSpec:
-        """Parse a text object arriving at the MCP boundary."""
         values = mapping(data, name)
         layer = optional(values, "layer", enum_converter(BoardLayer), name)
 
@@ -86,8 +80,6 @@ class TextSpec:
 
 @dataclass(frozen=True)
 class TextBoxSpec:
-    """A footprint text box to create or update."""
-
     top_left: PointMm
     bottom_right: PointMm
     value: str = ""
@@ -97,7 +89,6 @@ class TextBoxSpec:
 
     @classmethod
     def parse(cls, data: object, name: str = "text box") -> TextBoxSpec:
-        """Parse a text box object arriving at the MCP boundary."""
         values = mapping(data, name)
         layer = optional(values, "layer", enum_converter(BoardLayer), name)
 

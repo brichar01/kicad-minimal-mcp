@@ -25,14 +25,11 @@ class HasPolygons(Protocol):
 
 @dataclass(frozen=True)
 class StrokeSpec:
-    """The stroke a graphic shape is drawn with."""
-
     width_mm: float | None = None
     style: StrokeLineStyle.ValueType | None = None
 
     @classmethod
     def parse(cls, data: object, name: str = "stroke") -> StrokeSpec:
-        """Parse a stroke object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -49,7 +46,6 @@ class GraphicAppearance:
     filled: bool | None = None
 
     def apply(self, attributes: GraphicAttributes) -> None:
-        """Apply the stroke and fill this specification sets."""
         if self.stroke is not None:
             if self.stroke.width_mm is not None:
                 attributes.stroke.width = api_from_mm(self.stroke.width_mm)

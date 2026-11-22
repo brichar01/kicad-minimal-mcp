@@ -45,8 +45,6 @@ from kicad_minimal_mcp.units import PointMm
 
 
 class SymbolItemType(StrEnum):
-    """The item types a symbol read can filter on."""
-
     BITMAP = "bitmap"
     FIELD = "field"
     GRAPHIC = "graphic"
@@ -135,7 +133,6 @@ class SymbolItem:
 
     @property
     def category(self) -> Category:
-        """Return the summary category used for a symbol item."""
         category = SYMBOL_ITEM_TYPES.plural(self.item_type)
         if category is None:
             return Category.OTHER
@@ -143,7 +140,6 @@ class SymbolItem:
         return category
 
     def to_payload(self) -> Payload:
-        """Return the payload with the unit and body-style tags the item carries."""
         result = dict(self.payload)
         result["unit"] = self.unit
         result["body_style"] = self.body_style
@@ -155,7 +151,6 @@ class SymbolItem:
 
 
 def normalise_item_type(item_type: str) -> SymbolItemType | None:
-    """Return the canonical name for a symbol item-type filter."""
     return SYMBOL_ITEM_TYPES.normalise(item_type)
 
 
@@ -169,7 +164,6 @@ def item_matches_type(item: SymbolItem, item_type: SymbolItemType) -> bool:
 
 
 def item_id_of(item: SchematicItem | AnyMessage) -> ItemId | None:
-    """Return the UUID the IPC API addresses ``item`` by, when it has one."""
     if isinstance(item, AnyMessage):
         try:
             proto = unpack_any(item)
@@ -245,12 +239,10 @@ def symbol_item(
 
 
 def item_to_dict(item: SchematicItem | AnyMessage, kind: str | None = None) -> Payload:
-    """Convert a symbol child item to the MCP-facing dictionary shape."""
     return symbol_item(item, kind).payload
 
 
 def symbol_definition_to_dict(symbol: SchematicSymbol) -> Payload:
-    """Convert the symbol-level metadata to the MCP-facing dictionary shape."""
     attributes = symbol.attributes
 
     return {
@@ -316,7 +308,6 @@ SymbolItemSpec = PinSpec | TextSpec | TextBoxSpec | GraphicSpec
 
 
 def spec_item_type(spec: SymbolItemSpec) -> SymbolItemType:
-    """Return the item type a write specification creates."""
     match spec:
         case PinSpec():
             return SymbolItemType.PIN
@@ -329,7 +320,6 @@ def spec_item_type(spec: SymbolItemSpec) -> SymbolItemType:
 
 
 def item_from_spec(spec: SymbolItemSpec) -> SchematicItem:
-    """Create a KiCad symbol item from a parsed item specification."""
     match spec:
         case PinSpec():
             return pin_from_spec(spec)

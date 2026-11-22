@@ -67,7 +67,6 @@ def run_tool(result: ToolResult, body: Callable[[KiCad], None]) -> Payload:
 
 
 def requested_library_id(lib_id: str | None) -> LibraryId | None:
-    """Parse the optional ``lib_id`` tool argument."""
     if lib_id is None:
         return None
 

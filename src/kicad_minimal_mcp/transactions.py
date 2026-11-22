@@ -60,14 +60,11 @@ def apply_in_commit[T](
 
 @dataclass(frozen=True)
 class ItemDeletion:
-    """KiCad's answer for one item in a delete command."""
-
     item_id: ItemId
     status: editor_commands_pb2.ItemDeletionStatus.ValueType
     removed: bool = False
 
     def to_payload(self) -> Payload:
-        """Return the JSON form the tools report."""
         return {
             "item_id": self.item_id,
             "status": editor_commands_pb2.ItemDeletionStatus.Name(self.status),
@@ -108,8 +105,6 @@ def delete_in_commit(
 
 @dataclass(frozen=True)
 class WriteSummary:
-    """The counts and saved state of an applied item write."""
-
     saved: bool
     removed_count: int
     updated_count: int
@@ -119,7 +114,6 @@ class WriteSummary:
     created_items: list[Payload] | None = None
 
     def to_payload(self) -> Payload:
-        """Return the JSON form the tools report."""
         payload: Payload = {
             "applied": True,
             "committed": True,
@@ -140,8 +134,6 @@ class WriteSummary:
 
 @dataclass(frozen=True)
 class DeleteSummary:
-    """The item counts and saved state of an applied item deletion."""
-
     saved: bool
     item_ids: Sequence[ItemId]
     deleted_items: list[ItemDeletion]
@@ -149,7 +141,6 @@ class DeleteSummary:
     final_summary: Mapping[Category, int]
 
     def to_payload(self) -> Payload:
-        """Return the JSON form the tools report."""
         removed = [deletion for deletion in self.deleted_items if deletion.removed]
 
         return {

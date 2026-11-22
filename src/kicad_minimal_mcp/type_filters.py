@@ -17,8 +17,6 @@ ALL_TYPES = "all"
 
 
 class Category(StrEnum):
-    """The plural categories the per-item summaries count."""
-
     BITMAPS = "bitmaps"
     FIELDS = "fields"
     GRAPHICS = "graphics"
@@ -32,8 +30,6 @@ class Category(StrEnum):
 
 @dataclass(frozen=True)
 class TypeFilter[TypeNameT: StrEnum, ValueT]:
-    """A filterable type table, the spellings that alias it, and its plurals."""
-
     noun: str
     prefix: str
     values: Mapping[TypeNameT, ValueT]
@@ -62,11 +58,9 @@ class TypeFilter[TypeNameT: StrEnum, ValueT]:
         )
 
     def plural(self, item_type: TypeNameT) -> Category | None:
-        """Return the summary category for a canonical item type."""
         return self.plurals.get(item_type)
 
     def items(self) -> ItemsView[TypeNameT, ValueT]:
-        """Return the canonical name and IPC value pairs."""
         return self.values.items()
 
     def __getitem__(self, name: TypeNameT) -> ValueT:
@@ -79,5 +73,4 @@ class TypeFilter[TypeNameT: StrEnum, ValueT]:
 
 
 def summary_payload(counts: Mapping[Category, int]) -> dict[str, int]:
-    """Return the JSON summary of per-category item counts."""
     return {str(category): count for category, count in counts.items()}

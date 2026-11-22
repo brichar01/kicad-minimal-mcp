@@ -29,15 +29,12 @@ from kicad_minimal_mcp.units import PointMm, api_from_mm, mm_from_api
 
 @dataclass(frozen=True)
 class PinAlternateSpec:
-    """An alternate function of a symbol pin."""
-
     name: str = ""
     shape: SchematicPinShape.ValueType | None = None
     electrical_type: ElectricalPinType.ValueType | None = None
 
     @classmethod
     def parse(cls, data: object, name: str = "alternate") -> PinAlternateSpec:
-        """Parse an alternate pin object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -51,8 +48,6 @@ class PinAlternateSpec:
 
 @dataclass(frozen=True)
 class PinSpec:
-    """A symbol pin to create or update."""
-
     position: PointMm
     name: str = ""
     number: str = ""
@@ -71,7 +66,6 @@ class PinSpec:
 
     @classmethod
     def parse(cls, data: object, name: str = "pin") -> PinSpec:
-        """Parse a pin object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -100,9 +94,7 @@ class PinSpec:
 
 
 def pin_to_dict(pin: SchematicPin) -> Payload:
-    """Convert a symbol pin to the MCP-facing dictionary shape.
-
-    Positions and sizes are millimetres in the symbol definition's local
+    """Positions and sizes are millimetres in the symbol definition's local
     coordinate frame, as reported by the IPC API.
     """
     return {
@@ -131,7 +123,6 @@ def pin_to_dict(pin: SchematicPin) -> Payload:
 
 
 def pin_from_spec(spec: PinSpec) -> SchematicPin:
-    """Create a symbol pin from a parsed pin specification."""
     pin = SchematicPin()
     pin.name = spec.name
     pin.number = spec.number

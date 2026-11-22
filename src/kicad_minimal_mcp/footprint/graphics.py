@@ -39,16 +39,12 @@ from kicad_minimal_mcp.units import PointMm, SizeMm, mm_from_api
 
 @dataclass(frozen=True)
 class SegmentShape:
-    """A straight graphic line."""
-
     start: PointMm
     end: PointMm
 
 
 @dataclass(frozen=True)
 class ArcShape:
-    """A graphic arc drawn through three points."""
-
     start: PointMm
     mid: PointMm
     end: PointMm
@@ -56,24 +52,18 @@ class ArcShape:
 
 @dataclass(frozen=True)
 class CircleShape:
-    """A graphic circle."""
-
     center: PointMm
     radius_mm: float
 
 
 @dataclass(frozen=True)
 class RectangleShape:
-    """A graphic rectangle."""
-
     top_left: PointMm
     bottom_right: PointMm
 
 
 @dataclass(frozen=True)
 class BezierShape:
-    """A graphic bezier curve."""
-
     start: PointMm
     control1: PointMm
     control2: PointMm
@@ -86,15 +76,12 @@ FootprintShape = SegmentShape | ArcShape | CircleShape | RectangleShape | Bezier
 
 @dataclass(frozen=True)
 class GraphicSpec(GraphicAppearance):
-    """A footprint graphic: the shared appearance plus the shape it draws."""
-
     layer: BoardLayer.ValueType
     shape: FootprintShape
     id: ItemId | None = None
 
     @classmethod
     def parse(cls, data: object, name: str = "graphic") -> GraphicSpec:
-        """Parse a footprint graphic object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -196,7 +183,6 @@ def graphic_to_dict(item: BoardShape) -> Payload:
 
 
 def graphic_from_spec(spec: GraphicSpec) -> BoardShape:
-    """Create a footprint graphic item from a parsed specification."""
     item = _board_shape(spec.shape)
     item.layer = spec.layer
     spec.apply(item.attributes)

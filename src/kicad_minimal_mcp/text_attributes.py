@@ -20,8 +20,6 @@ from kicad_minimal_mcp.units import SizeMm, api_from_mm, mm_from_api
 
 @dataclass(frozen=True)
 class TextAttributesSpec:
-    """The text attributes a write specification may set."""
-
     size: SizeMm | None = None
     thickness_mm: float | None = None
     angle_degrees: float | None = None
@@ -34,7 +32,6 @@ class TextAttributesSpec:
 
     @classmethod
     def parse(cls, data: object, name: str = "attributes") -> TextAttributesSpec:
-        """Parse a text attribute object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -79,7 +76,6 @@ class TextAttributesSpec:
 
 
 def text_attributes_to_dict(attributes: TextAttributes) -> Payload:
-    """Convert shared text attributes to the MCP-facing dictionary shape."""
     return {
         "size": SizeMm.from_vector(attributes.size).to_payload(),
         "thickness_mm": mm_from_api(attributes.stroke_width),

@@ -33,8 +33,6 @@ MANDATORY_FIELD_IDS = {
 
 @dataclass(frozen=True)
 class TextSpec:
-    """A symbol text item to create or update."""
-
     position: PointMm
     value: str = ""
     attributes: TextAttributesSpec = field(default_factory=TextAttributesSpec)
@@ -44,7 +42,6 @@ class TextSpec:
 
     @classmethod
     def parse(cls, data: object, name: str = "text") -> TextSpec:
-        """Parse a symbol text object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -60,8 +57,6 @@ class TextSpec:
 
 @dataclass(frozen=True)
 class TextBoxSpec:
-    """A symbol text box to create or update."""
-
     top_left: PointMm
     bottom_right: PointMm
     value: str = ""
@@ -72,7 +67,6 @@ class TextBoxSpec:
 
     @classmethod
     def parse(cls, data: object, name: str = "text box") -> TextBoxSpec:
-        """Parse a symbol text box object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -88,9 +82,7 @@ class TextBoxSpec:
 
 
 def field_to_dict(item: SchematicField) -> Payload:
-    """Convert a symbol field to the MCP-facing dictionary shape.
-
-    Symbol fields have no unique identifier in the IPC API, so ``id`` is always
+    """Symbol fields have no unique identifier in the IPC API, so ``id`` is always
     ``None`` and fields cannot be addressed by ``item_ids``.
     """
     item_text = item.text
@@ -111,7 +103,6 @@ def field_to_dict(item: SchematicField) -> Payload:
 
 
 def text_to_dict(item: SchematicText) -> Payload:
-    """Convert a symbol text item to the MCP-facing dictionary shape."""
     return {
         "type": "text",
         "id": item.id.value,
@@ -122,7 +113,6 @@ def text_to_dict(item: SchematicText) -> Payload:
 
 
 def text_box_to_dict(item: SchematicTextBox) -> Payload:
-    """Convert a symbol text box to the MCP-facing dictionary shape."""
     return {
         "type": "text_box",
         "id": item.id.value,
@@ -134,7 +124,6 @@ def text_box_to_dict(item: SchematicTextBox) -> Payload:
 
 
 def text_from_spec(spec: TextSpec) -> SchematicText:
-    """Create a symbol text item from a parsed text specification."""
     item = SchematicText()
     item.value = spec.value
     item.position = spec.position.to_vector()
@@ -144,7 +133,6 @@ def text_from_spec(spec: TextSpec) -> SchematicText:
 
 
 def text_box_from_spec(spec: TextBoxSpec) -> SchematicTextBox:
-    """Create a symbol text box from a parsed text box specification."""
     item = SchematicTextBox()
     item.value = spec.value
     item.top_left = spec.top_left.to_vector()

@@ -34,7 +34,6 @@ def footprint_editor(kicad: KiCad, document: DocumentSpecifier) -> Board:
 
 
 def footprint_parent_id(items: Sequence[BoardItem]) -> ItemId:
-    """Return the UUID of the footprint that owns ``items``."""
     for item in items:
         if isinstance(item, Field) and item.proto.text.HasField("parent"):
             return item.proto.text.parent.value

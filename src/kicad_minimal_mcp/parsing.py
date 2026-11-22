@@ -16,7 +16,6 @@ from collections.abc import Callable, Mapping, Sequence
 
 
 def mapping(value: object, name: str) -> Mapping[str, object]:
-    """Return ``value`` as a JSON object, or raise a ``ValueError``."""
     if not isinstance(value, Mapping):
         raise ValueError(f"{name} must be a JSON object")
 
@@ -24,7 +23,6 @@ def mapping(value: object, name: str) -> Mapping[str, object]:
 
 
 def sequence(value: object, name: str) -> Sequence[object]:
-    """Return ``value`` as a JSON array, or raise a ``ValueError``."""
     if isinstance(value, str) or not isinstance(value, Sequence):
         raise ValueError(f"{name} must be an array")
 
@@ -80,7 +78,6 @@ def converted_list[T](
 
 
 def text(value: object, name: str) -> str:
-    """Return ``value`` as a string, or raise a ``ValueError``."""
     if not isinstance(value, str):
         raise ValueError(f"{name} must be a string")
 
@@ -88,7 +85,6 @@ def text(value: object, name: str) -> str:
 
 
 def boolean(value: object, name: str) -> bool:
-    """Return ``value`` as a boolean, or raise a ``ValueError``."""
     if not isinstance(value, bool):
         raise ValueError(f"{name} must be a boolean")
 
@@ -96,7 +92,6 @@ def boolean(value: object, name: str) -> bool:
 
 
 def number(value: object, name: str) -> float:
-    """Return ``value`` as a number, or raise a ``ValueError``."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{name} must be a number")
 
@@ -104,7 +99,6 @@ def number(value: object, name: str) -> float:
 
 
 def integer(value: object, name: str) -> int:
-    """Return ``value`` as an integer, or raise a ``ValueError``."""
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{name} must be an integer")
 

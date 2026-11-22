@@ -22,25 +22,20 @@ def mm_from_api(value: float) -> float:
 
 
 def api_from_mm(value: float) -> int:
-    """Convert millimetres to API nanometres."""
     return from_mm(float(value))
 
 
 @dataclass(frozen=True)
 class PointMm:
-    """A point in millimetres, as the MCP tools present and accept it."""
-
     x_mm: float
     y_mm: float
 
     @classmethod
     def from_vector(cls, point: Vector2) -> PointMm:
-        """Convert an API point to millimetres."""
         return cls(x_mm=mm_from_api(point.x), y_mm=mm_from_api(point.y))
 
     @classmethod
     def parse(cls, data: object, name: str = "position") -> PointMm:
-        """Parse an ``x_mm``/``y_mm`` object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -49,18 +44,14 @@ class PointMm:
         )
 
     def to_vector(self) -> Vector2:
-        """Convert to the API representation."""
         return Vector2.from_xy_mm(self.x_mm, self.y_mm)
 
     def to_payload(self) -> Payload:
-        """Return the JSON form the tools report."""
         return {"x_mm": self.x_mm, "y_mm": self.y_mm}
 
 
 @dataclass(frozen=True)
 class SizeMm:
-    """A width and height in millimetres."""
-
     width_mm: float
     height_mm: float
 
@@ -73,7 +64,6 @@ class SizeMm:
 
     @classmethod
     def parse(cls, data: object, name: str = "size") -> SizeMm:
-        """Parse a ``width_mm``/``height_mm`` object arriving at the boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -82,9 +72,7 @@ class SizeMm:
         )
 
     def to_vector(self) -> Vector2:
-        """Convert to the API representation."""
         return Vector2.from_xy_mm(self.width_mm, self.height_mm)
 
     def to_payload(self) -> Payload:
-        """Return the JSON form the tools report."""
         return {"width_mm": self.width_mm, "height_mm": self.height_mm}

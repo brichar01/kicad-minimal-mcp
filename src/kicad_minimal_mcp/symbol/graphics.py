@@ -48,15 +48,12 @@ from kicad_minimal_mcp.units import PointMm, SizeMm, api_from_mm, mm_from_api
 
 @dataclass(frozen=True)
 class ArcNode:
-    """An arc segment of a polygon outline."""
-
     start: PointMm
     mid: PointMm
     end: PointMm
 
     @classmethod
     def parse(cls, data: object, name: str) -> ArcNode:
-        """Parse an arc node object arriving at the MCP boundary."""
         values = mapping(data, name)
 
         return cls(
@@ -72,15 +69,12 @@ PolygonNode = PointMm | ArcNode
 
 @dataclass(frozen=True)
 class PolygonOutline:
-    """A polygon outline, its closed flag, and the holes cut out of it."""
-
     outline: list[PolygonNode] = field(default_factory=list)
     closed: bool = False
     holes: list[list[PointMm]] = field(default_factory=list)
 
     @classmethod
     def parse(cls, data: object, name: str = "polygon") -> PolygonOutline:
-        """Parse a polygon object arriving at the MCP boundary."""
         values = mapping(data, name)
         closed = optional(values, "closed", boolean, name)
 
@@ -91,7 +85,6 @@ class PolygonOutline:
         )
 
     def to_geometry(self) -> PolygonWithHoles:
-        """Build the kipy polygon this outline describes."""
         polygon = PolygonWithHoles(auto_close=False)
         polygon.outline = _polyline(self.outline, closed=self.closed)
 
@@ -103,8 +96,6 @@ class PolygonOutline:
 
 @dataclass(frozen=True)
 class ArcShape:
-    """A graphic arc drawn through three points."""
-
     start: PointMm
     mid: PointMm
     end: PointMm
@@ -112,24 +103,18 @@ class ArcShape:
 
 @dataclass(frozen=True)
 class CircleShape:
-    """A graphic circle."""
-
     center: PointMm
     radius_mm: float
 
 
 @dataclass(frozen=True)
 class RectangleShape:
-    """A graphic rectangle."""
-
     top_left: PointMm
     bottom_right: PointMm
 
 
 @dataclass(frozen=True)
 class BezierShape:
-    """A graphic bezier curve."""
-
     start: PointMm
     control1: PointMm
     control2: PointMm
@@ -138,15 +123,11 @@ class BezierShape:
 
 @dataclass(frozen=True)
 class PolygonShape:
-    """A filled or outline polygon."""
-
     polygons: list[PolygonOutline] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class EllipseShape:
-    """A graphic ellipse."""
-
     center: PointMm
     major_radius_mm: float
     minor_radius_mm: float
@@ -155,8 +136,6 @@ class EllipseShape:
 
 @dataclass(frozen=True)
 class EllipseArcShape:
-    """A graphic arc of an ellipse."""
-
     center: PointMm
     major_radius_mm: float
     minor_radius_mm: float
@@ -179,8 +158,6 @@ SymbolShape = (
 
 @dataclass(frozen=True)
 class GraphicSpec(GraphicAppearance):
-    """A symbol graphic: the shared appearance plus the shape it draws."""
-
     shape: SymbolShape
     id: ItemId | None = None
     unit: int | None = None
@@ -188,7 +165,6 @@ class GraphicSpec(GraphicAppearance):
 
     @classmethod
     def parse(cls, data: object, name: str = "graphic") -> GraphicSpec:
-        """Parse a symbol graphic object arriving at the MCP boundary."""
         values = mapping(data, name)
         shape = converted(values, "shape", text, name)
 
@@ -290,7 +266,6 @@ def graphic_base_to_dict(item: SchematicGraphicShape) -> Payload:
 
 
 def graphic_to_dict(item: SchematicGraphicShape) -> Payload:
-    """Convert a symbol graphic shape to the MCP-facing dictionary shape."""
     result = graphic_base_to_dict(item)
     shape = item.shape
 
@@ -338,7 +313,6 @@ def graphic_to_dict(item: SchematicGraphicShape) -> Payload:
 
 
 def graphic_from_spec(spec: GraphicSpec) -> SchematicGraphicShape:
-    """Create a symbol graphic item from a parsed specification."""
     shape = _graphic_shape(spec.shape)
     spec.apply(shape.attributes)
 

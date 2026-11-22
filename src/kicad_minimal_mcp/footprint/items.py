@@ -31,8 +31,6 @@ from kicad_minimal_mcp.type_filters import Category, TypeFilter
 
 
 class FootprintItemType(StrEnum):
-    """The item types a footprint read can filter on."""
-
     BARCODE = "barcode"
     DIMENSION = "dimension"
     FIELD = "field"
@@ -90,12 +88,10 @@ ITEM_TYPES = TypeFilter(
 
 
 def normalise_item_type(item_type: str) -> FootprintItemType | None:
-    """Return the canonical name for a footprint item-type filter."""
     return ITEM_TYPES.normalise(item_type)
 
 
 def item_type_of(item: BoardItem) -> FootprintItemType:
-    """Return the canonical item type for a footprint item."""
     if isinstance(item, Pad):
         return FootprintItemType.PAD
     if isinstance(item, Field):
@@ -111,7 +107,6 @@ def item_type_of(item: BoardItem) -> FootprintItemType:
 
 
 def item_category(item: BoardItem) -> Category:
-    """Return the summary category used for a footprint item."""
     category = ITEM_TYPES.plural(item_type_of(item))
     if category is None:
         return Category.OTHER
@@ -120,7 +115,6 @@ def item_category(item: BoardItem) -> Category:
 
 
 def item_matches_type(item: BoardItem, item_type: FootprintItemType) -> bool:
-    """Return whether an item matches a canonical item-type filter."""
     category = ITEM_TYPES.plural(item_type)
     if category is not None:
         return item_category(item) == category
@@ -141,7 +135,6 @@ def item_uuid(item: BoardItem) -> ItemId:
 
 
 def item_to_dict(item: BoardItem) -> Payload:
-    """Convert a footprint item to the MCP-facing dictionary shape."""
     if isinstance(item, Pad):
         return pad_to_dict(item)
     if isinstance(item, Field):
@@ -163,7 +156,6 @@ ItemSpec = PadSpec | FieldSpec | TextSpec | TextBoxSpec | GraphicSpec
 
 
 def item_from_spec(spec: ItemSpec) -> BoardItem:
-    """Create a KiCad footprint item from a parsed item specification."""
     match spec:
         case PadSpec():
             return pad_from_spec(spec)
@@ -180,7 +172,6 @@ def item_from_spec(spec: ItemSpec) -> BoardItem:
 
 
 def parse_item_spec(data: object) -> ItemSpec:
-    """Parse the MCP-facing item shape into a typed specification."""
     values = mapping(data, "item specification")
     kind = text(required(values, "type", "item specification"), "item.type").lower()
 

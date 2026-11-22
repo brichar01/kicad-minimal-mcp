@@ -19,7 +19,6 @@ class LibraryId:
 
     @classmethod
     def parse(cls, value: str) -> LibraryId:
-        """Parse a ``Library:Name`` string arriving at the MCP boundary."""
         nickname, separator, entry = value.strip().partition(":")
         complete = bool(separator) and bool(nickname) and bool(entry)
         if not complete:
@@ -29,7 +28,6 @@ class LibraryId:
 
     @classmethod
     def from_document(cls, document: DocumentSpecifier) -> LibraryId | None:
-        """Return the library identifier an open library-item document carries."""
         if document.WhichOneof("identifier") != "lib_id":
             return None
 

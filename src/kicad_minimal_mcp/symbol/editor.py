@@ -66,7 +66,6 @@ class SymbolEditor(Schematic):
 
 
 def symbol_editor(kicad: KiCad, document: DocumentSpecifier) -> SymbolEditor:
-    """Wrap an open symbol document in the editor item API."""
     return SymbolEditor(kicad._client, document)
 
 
@@ -108,7 +107,6 @@ def _guard_unit_reset(
 
 
 def _check_new_item_tags(spec: SymbolItemSpec) -> None:
-    """Refuse unit or body-style tags on a specification that creates an item."""
     for tag, value in (("unit", spec.unit), ("body_style", spec.body_style)):
         if value in (None, 0):
             continue
