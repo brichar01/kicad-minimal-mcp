@@ -14,11 +14,7 @@ from kicad_minimal_mcp.tools.runner import run_tool
 
 @mcp.tool()
 def kicad_status() -> dict[str, Any]:
-    """Report whether the KiCad IPC API is reachable and which version is running.
-
-    This never raises for an unavailable KiCad instance; inspect the ``connected``
-    field in the result instead.
-    """
+    """Report whether the KiCad IPC API is reachable and which version is running."""
     result = ToolResult(
         body={
             "server_version": SERVER_VERSION,

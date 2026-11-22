@@ -31,11 +31,10 @@ def delete_symbol_items(
     """Delete symbol items by UUID using an atomic IPC commit.
 
     ``item_ids`` are the ``id`` values returned by :func:`get_symbol_items`.
-    The deletion is grouped into one commit and saved to the library entry by
-    default. Symbol fields have no UUID in the IPC API, so they cannot be
-    addressed here; mandatory fields are not deletable anyway. Every requested
-    ID is reported in ``deleted_items`` with the status KiCad returned and
-    whether the item is actually gone afterwards.
+    Symbol fields have no UUID in the IPC API, so they cannot be addressed here;
+    mandatory fields are not deletable anyway. Every requested ID is reported in
+    ``deleted_items`` with the status KiCad returned and whether the item is
+    actually gone afterwards.
     """
     result = ToolResult(
         body={
@@ -83,10 +82,7 @@ def write_symbol_items(
     ``text_box``, and ``graphic`` (arc, circle, rectangle, bezier, polygon,
     ellipse, or ellipse arc; symbol graphics have no segment type, so use a
     two-point polygon for a line). Specs that include an ``id`` update that
-    existing item; specs without an ``id`` are created. When
-    ``replace_existing`` is true, all existing non-field items are removed
-    first. The edit is grouped into one commit and saved to the library entry
-    by default.
+    existing item; specs without an ``id`` are created.
 
     Some changes are not possible through the current IPC API and are refused
     with an ``invalid_request`` result rather than applied silently:
@@ -101,9 +97,7 @@ def write_symbol_items(
       Common items (``unit``/``body_style`` of ``null`` or ``0``) can be updated.
 
     ``created_items`` reports the items KiCad created, including the UUIDs it
-    assigned. The operation is transactional at the commit level: if validation
-    or any IPC command fails before the commit is pushed, the pending commit is
-    dropped.
+    assigned.
     """
     result = ToolResult(
         body={

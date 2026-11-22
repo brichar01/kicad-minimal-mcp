@@ -39,9 +39,8 @@ def get_footprint_items(
     ``lib_id`` optionally selects a footprint as ``Library:Name``. If omitted, the
     single open footprint is used. ``item_type`` accepts ``all`` (the default),
     ``pad``, ``field``, ``text``, ``text_box``, ``graphic``, ``zone``, ``table``,
-    ``barcode``, ``dimension``, or ``group``; plural and ``KOT_PCB_*`` names are
-    also accepted. Graphics include segments, arcs, circles, rectangles,
-    polygons, and beziers.
+    ``barcode``, ``dimension``, or ``group``. Graphics include segments, arcs,
+    circles, rectangles, polygons, and beziers.
 
     ``item_ids`` optionally restricts the read to specific item UUIDs, using the
     ``get_items_by_id`` IPC command. When both filters are supplied, only items
@@ -50,8 +49,7 @@ def get_footprint_items(
     Positions and sizes are returned in millimetres, relative to the footprint
     origin. Pads include their copper-layer shapes and sizes, padstack layers,
     and drill data when present. Fields include their text, visibility, layer,
-    and text attributes. This never raises for an unavailable KiCad instance;
-    inspect the ``connected`` field in the result instead.
+    and text attributes.
     """
     result = ToolResult(
         body={

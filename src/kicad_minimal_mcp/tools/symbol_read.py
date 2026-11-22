@@ -37,21 +37,18 @@ def get_symbol_items(
     ``lib_id`` optionally selects a symbol as ``Library:Name``. If omitted, the
     single open symbol is used. ``item_type`` accepts ``all`` (the default),
     ``pin``, ``field``, ``text``, ``text_box``, ``graphic``, ``table``, or
-    ``bitmap``; plural and ``KOT_SCH_*`` names are also accepted. Graphics
-    include segments, arcs, circles, rectangles, polygons, beziers, ellipses,
-    and ellipse arcs.
+    ``bitmap``. Graphics include segments, arcs, circles, rectangles, polygons,
+    beziers, ellipses, and ellipse arcs.
 
     ``item_ids`` optionally restricts the read to specific item UUIDs.
 
     The symbol definition is read as a whole, so every item carries the
     ``unit`` and ``body_style`` it belongs to (``null`` means common to all
     units or body styles; KiCad's explicit zero is reported the same way).
-    Positions and sizes are returned in millimetres in
-    the symbol definition's local coordinate frame, as reported by the IPC API.
-    Mandatory fields (Reference, Value, Footprint, Datasheet, Description) are
-    returned alongside the other items with their ``field_id``. This never
-    raises for an unavailable KiCad instance; inspect the ``connected`` field in
-    the result instead.
+    Positions and sizes are returned in millimetres in the symbol definition's
+    local coordinate frame, as reported by the IPC API. Mandatory fields
+    (Reference, Value, Footprint, Datasheet, Description) are returned alongside
+    the other items with their ``field_id``.
     """
     result = ToolResult(
         body={

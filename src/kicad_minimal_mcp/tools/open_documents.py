@@ -24,8 +24,7 @@ def get_open_documents(document_type: str = "all") -> dict[str, Any]:
     """List documents currently open in KiCad.
 
     ``document_type`` accepts ``all`` (the default), ``pcb``, ``schematic``,
-    ``symbol``, ``footprint``, ``drawing_sheet``, or ``project``. The
-    ``DOCTYPE_*`` enum names used by the IPC API are also accepted. Footprint
+    ``symbol``, ``footprint``, ``drawing_sheet``, or ``project``. Footprint
     documents are identified by their ``lib_id``; use that specifier with the
     footprint item-editing commands.
 
@@ -33,9 +32,6 @@ def get_open_documents(document_type: str = "all") -> dict[str, Any]:
     example, footprint documents are only discoverable while the footprint
     editor is open. Types that KiCad cannot handle are listed in
     ``unavailable_document_types`` instead of failing the whole request.
-
-    This never raises for an unavailable KiCad instance; inspect the
-    ``connected`` field in the result instead.
     """
     result = ToolResult(
         body={

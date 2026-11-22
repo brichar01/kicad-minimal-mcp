@@ -31,12 +31,10 @@ def delete_footprint_items(
     """Delete footprint items by UUID using an atomic IPC commit.
 
     ``item_ids`` are the ``id`` values returned by :func:`get_footprint_items`.
-    The deletion is grouped into one commit and saved to the library entry by
-    default. Mandatory footprint fields cannot be deleted; KiCad rejects those
-    deletions at the IPC layer. Every requested ID is reported in
-    ``deleted_items`` with the status KiCad returned and whether the item is
-    actually gone afterwards, because a field can report ``IDS_OK`` and still
-    remain in the footprint.
+    Mandatory footprint fields cannot be deleted; KiCad rejects those deletions
+    at the IPC layer. Every requested ID is reported in ``deleted_items`` with
+    the status KiCad returned and whether the item is actually gone afterwards,
+    because a field can report ``IDS_OK`` and still remain in the footprint.
     """
     result = ToolResult(
         body={
@@ -83,18 +81,13 @@ def write_footprint_items(
     :func:`get_footprint_items`. Supported item types are ``pad``, ``field``,
     ``text``, ``text_box``, and ``graphic`` (segment, arc, circle, rectangle, or
     bezier). Existing mandatory fields are updated by ``field_id`` or, when no
-    ``field_id`` is given, by ``name``; the KiCad field ids are 1 Reference,
-    2 Value, 4 Datasheet, and 5 Description. ``USER`` fields use id 0. Other
-    specs that include an ``id`` update that existing item; specs without an
-    ``id`` are created with new UUIDs. Pad ``copper_layers`` entries accept
-    ``shape`` (``PSS_CIRCLE``, ``PSS_RECTANGLE``, ``PSS_OVAL``, ``PSS_ROUNDRECT``,
-    ``PSS_CHAMFEREDRECT``, ``PSS_TRAPEZOID``, ``PSS_CUSTOM``), ``size``,
-    ``offset``, and ``corner_rounding_ratio`` for the rect shapes. When
-    ``replace_existing`` is true, all existing non-field items are removed first.
-    The edit is grouped into one commit and saved to the library entry by default.
-
-    The operation is transactional at the commit level: if validation or any
-    IPC command fails before the commit is pushed, the pending commit is dropped.
+    ``field_id`` is given, by ``name``; field ids follow KiCad's ``FIELD_T``
+    enum, where ``USER`` is 0. Other specs that include an ``id`` update that
+    existing item; specs without an ``id`` are created with new UUIDs. Pad
+    ``copper_layers`` entries accept ``shape`` (``PSS_CIRCLE``, ``PSS_RECTANGLE``,
+    ``PSS_OVAL``, ``PSS_ROUNDRECT``, ``PSS_CHAMFEREDRECT``, ``PSS_TRAPEZOID``,
+    ``PSS_CUSTOM``), ``size``, ``offset``, and ``corner_rounding_ratio`` for the
+    rect shapes.
     """
     result = ToolResult(
         body={
